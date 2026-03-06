@@ -1,0 +1,16 @@
+.vscode/
+.idea/
+.DS_Store
+
+*.log
+*.tmp
+*.bak
+*.swp
+
+TestResults/
+coverage.xml
+*.coverage
+*.trx
+
+state/runtime/
+reports/output/
