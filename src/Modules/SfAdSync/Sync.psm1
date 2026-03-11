@@ -132,6 +132,32 @@ function Get-SfAdWorkerStateSnapshot {
     return Convert-ToSfAdSerializable -Value $workerState
 }
 
+function Get-SfAdCollectionCount {
+    [CmdletBinding()]
+    param($Value)
+
+    if ($null -eq $Value) {
+        return 0
+    }
+
+    if ($Value -is [System.Array]) {
+        return @($Value).Count
+    }
+
+    return 1
+}
+
+function Get-SfAdSingleResult {
+    [CmdletBinding()]
+    param($Value)
+
+    if ($Value -is [System.Array]) {
+        return @($Value)[0]
+    }
+
+    return $Value
+}
+
 function Set-SfAdTrackedWorkerState {
     [CmdletBinding()]
     param(
@@ -170,11 +196,13 @@ function Set-SfAdManagerAttributeIfPossible {
         [string]$WorkerId
     )
 
-    if (-not $Worker.managerEmployeeId) {
+    $managerProperty = $Worker.PSObject.Properties['managerEmployeeId']
+    if (-not $managerProperty -or [string]::IsNullOrWhiteSpace("$($managerProperty.Value)")) {
         return
     }
 
-    $manager = Get-SfAdTargetUser -Config $Config -WorkerId $Worker.managerEmployeeId
+    $managerEmployeeId = "$($managerProperty.Value)"
+    $manager = Get-SfAdTargetUser -Config $Config -WorkerId $managerEmployeeId
     if ($manager) {
         $Changes['manager'] = $manager.DistinguishedName
         return
@@ -183,8 +211,82 @@ function Set-SfAdManagerAttributeIfPossible {
     Add-SfAdReportEntry -Report $Report -Bucket 'quarantined' -Entry @{
         workerId = $WorkerId
         reason = 'ManagerNotResolved'
-        managerEmployeeId = $Worker.managerEmployeeId
+        managerEmployeeId = $managerEmployeeId
     }
+}
+
+function Assert-SfAdSafetyThreshold {
+    [CmdletBinding()]
+    param(
+        [pscustomobject]$Config,
+        [System.Collections.IDictionary]$Report,
+        [Parameter(Mandatory)]
+        [string]$ThresholdName,
+        [Parameter(Mandatory)]
+        [int]$CurrentCount,
+        [Parameter(Mandatory)]
+        [hashtable]$Entry
+    )
+
+    if (-not $Config.safety) {
+        return
+    }
+
+    $limit = $Config.safety.$ThresholdName
+    if ($null -eq $limit -or "$limit" -eq '') {
+        return
+    }
+
+    if (($CurrentCount + 1) -le [int]$limit) {
+        return
+    }
+
+    Add-SfAdReportEntry -Report $Report -Bucket 'guardrailFailures' -Entry $Entry
+    throw "Safety threshold '$ThresholdName' exceeded."
+}
+
+function Test-SfAdCreateConflicts {
+    [CmdletBinding()]
+    param(
+        [pscustomobject]$Config,
+        [string]$WorkerId,
+        [hashtable]$Changes,
+        [System.Collections.IDictionary]$Report
+    )
+
+    $conflicts = @()
+
+    if ($Changes.ContainsKey('SamAccountName')) {
+        $samMatches = Get-SfAdUserBySamAccountName -SamAccountName $Changes['SamAccountName']
+        if ((Get-SfAdCollectionCount -Value $samMatches) -gt 0) {
+            $conflicts += [pscustomobject]@{
+                workerId = $WorkerId
+                reason = 'SamAccountNameCollision'
+                value = $Changes['SamAccountName']
+            }
+        }
+    }
+
+    if ($Changes.ContainsKey('UserPrincipalName')) {
+        $upnMatches = Get-SfAdUserByUserPrincipalName -UserPrincipalName $Changes['UserPrincipalName']
+        if ((Get-SfAdCollectionCount -Value $upnMatches) -gt 0) {
+            $conflicts += [pscustomobject]@{
+                workerId = $WorkerId
+                reason = 'UserPrincipalNameCollision'
+                value = $Changes['UserPrincipalName']
+            }
+        }
+    }
+
+    foreach ($conflict in $conflicts) {
+        Add-SfAdReportEntry -Report $Report -Bucket 'conflicts' -Entry @{
+            workerId = $conflict.workerId
+            reason = $conflict.reason
+            value = $conflict.value
+        }
+    }
+
+    return ($conflicts.Count -gt 0)
 }
 
 function Invoke-SfAdOffboarding {
@@ -198,8 +300,14 @@ function Invoke-SfAdOffboarding {
         [switch]$DryRun
     )
 
-    $workerId = "$($Worker.employeeId)"
+    $workerId = Get-SfAdWorkerIdentityValue -Worker $Worker -Config $Config
     $userTarget = Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $User
+
+    Assert-SfAdSafetyThreshold -Config $Config -Report $Report -ThresholdName 'maxDisablesPerRun' -CurrentCount @($Report.disables).Count -Entry @{
+        workerId = $workerId
+        threshold = 'maxDisablesPerRun'
+        attemptedCount = @($Report.disables).Count + 1
+    }
 
     $disableBefore = [pscustomobject]@{ enabled = [bool]$User.Enabled }
     Disable-SfAdUser -User $User -DryRun:$DryRun
@@ -258,6 +366,12 @@ function Invoke-SfAdDeletionPass {
             continue
         }
 
+        Assert-SfAdSafetyThreshold -Config $Config -Report $Report -ThresholdName 'maxDeletionsPerRun' -CurrentCount @($Report.deletions).Count -Entry @{
+            workerId = $property.Name
+            threshold = 'maxDeletionsPerRun'
+            attemptedCount = @($Report.deletions).Count + 1
+        }
+
         $user = Get-SfAdUserByObjectGuid -ObjectGuid $workerState.adObjectGuid
         if (-not $user) {
             continue
@@ -283,6 +397,35 @@ function Invoke-SfAdDeletionPass {
     }
 }
 
+function Test-SfAdSyncPreflight {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ConfigPath,
+        [Parameter(Mandatory)]
+        [string]$MappingConfigPath
+    )
+
+    $resolvedConfigPath = (Resolve-Path -Path $ConfigPath).Path
+    $resolvedMappingConfigPath = (Resolve-Path -Path $MappingConfigPath).Path
+    $config = Get-SfAdSyncConfig -Path $resolvedConfigPath
+    $mapping = Get-SfAdSyncMappingConfig -Path $resolvedMappingConfigPath
+    Ensure-ActiveDirectoryModule
+
+    return [pscustomobject]@{
+        success = $true
+        configPath = $resolvedConfigPath
+        mappingConfigPath = $resolvedMappingConfigPath
+        identityField = $config.successFactors.query.identityField
+        identityAttribute = $config.ad.identityAttribute
+        statePath = $config.state.path
+        stateDirectoryExists = Test-Path -Path (Split-Path -Path $config.state.path -Parent) -PathType Container
+        reportDirectory = $config.reporting.outputDirectory
+        reportDirectoryExists = Test-Path -Path $config.reporting.outputDirectory -PathType Container
+        mappingCount = @($mapping.mappings).Count
+    }
+}
+
 function Invoke-SfAdSyncRun {
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -302,173 +445,225 @@ function Invoke-SfAdSyncRun {
     $state = Get-SfAdSyncState -Path $config.state.path
     $report = New-SfAdSyncReport -Mode $Mode -DryRun:$DryRun -ConfigPath $resolvedConfigPath -MappingConfigPath $resolvedMappingConfigPath -StatePath $config.state.path
     $checkpoint = if ($Mode -eq 'Delta') { $state.checkpoint } else { $null }
+    $reportPath = $null
 
-    Write-SfAdSyncLog -Message "Fetching SuccessFactors workers in $Mode mode."
-    $workers = Get-SfWorkers -Config $config -Mode $Mode -Checkpoint $checkpoint
-
-    foreach ($worker in $workers) {
-        $workerId = Get-SfAdWorkerIdentityValue -Worker $worker -Config $config
-        if ([string]::IsNullOrWhiteSpace($workerId)) {
-            Add-SfAdReportEntry -Report $report -Bucket 'quarantined' -Entry @{
-                workerId = $null
-                reason = 'MissingEmployeeId'
-            }
-            continue
-        }
-
-        $existingUser = Get-SfAdTargetUser -Config $config -WorkerId $workerId
-        $workerState = Get-SfAdWorkerState -State $state -WorkerId $workerId
-
-        if ($workerState -and $workerState.suppressed -and (Test-SfAdWorkerIsActive -Worker $worker)) {
-            Add-SfAdReportEntry -Report $report -Bucket 'manualReview' -Entry @{
-                workerId = $workerId
-                reason = 'RehireDetected'
-                distinguishedName = $workerState.distinguishedName
-            }
-            continue
-        }
-
-        if (-not (Test-SfAdWorkerIsActive -Worker $worker)) {
-            if ($existingUser) {
-                Invoke-SfAdOffboarding -Config $config -User $existingUser -Worker $worker -State $state -Report $report -DryRun:$DryRun
-            }
-            continue
-        }
-
-        $attributeResult = Get-SfAdAttributeChanges -Worker $worker -ExistingUser $existingUser -MappingConfig $mappingConfig
-        if ($attributeResult.MissingRequired.Count -gt 0) {
-            Add-SfAdReportEntry -Report $report -Bucket 'quarantined' -Entry @{
-                workerId = $workerId
-                reason = 'MissingRequiredData'
-                fields = $attributeResult.MissingRequired
-            }
-            continue
-        }
-
-        $changes = @{}
-        foreach ($key in $attributeResult.Changes.Keys) {
-            $changes[$key] = $attributeResult.Changes[$key]
-        }
-
-        $changes[$config.ad.identityAttribute] = $workerId
-        Set-SfAdManagerAttributeIfPossible -Config $config -Worker $worker -Changes $changes -Report $report -WorkerId $workerId
-
-        if (-not $existingUser) {
-            $createdUser = New-SfAdUser -Config $config -Worker $worker -WorkerId $workerId -Attributes $changes -DryRun:$DryRun
-            Add-SfAdReportEntry -Report $report -Bucket 'creates' -Entry @{
-                workerId = $workerId
-                samAccountName = if ($createdUser.SamAccountName) { $createdUser.SamAccountName } else { $workerId }
+    try {
+        Write-SfAdSyncLog -Message "Fetching SuccessFactors workers in $Mode mode."
+        $workers = @(Get-SfWorkers -Config $config -Mode $Mode -Checkpoint $checkpoint)
+        $workerCountsByIdentity = @{}
+        foreach ($worker in $workers) {
+            $candidateWorkerId = Get-SfAdWorkerIdentityValue -Worker $worker -Config $config
+            if ([string]::IsNullOrWhiteSpace($candidateWorkerId)) {
+                continue
             }
 
-            if (-not $DryRun -and $createdUser) {
-                try {
-                    $createAfter = Get-SfAdUserSnapshot -User $createdUser
-                } catch {
+            if (-not $workerCountsByIdentity.ContainsKey($candidateWorkerId)) {
+                $workerCountsByIdentity[$candidateWorkerId] = 0
+            }
+            $workerCountsByIdentity[$candidateWorkerId] += 1
+        }
+
+        foreach ($worker in $workers) {
+            $workerId = Get-SfAdWorkerIdentityValue -Worker $worker -Config $config
+            if ([string]::IsNullOrWhiteSpace($workerId)) {
+                Add-SfAdReportEntry -Report $report -Bucket 'quarantined' -Entry @{
+                    workerId = $null
+                    reason = 'MissingEmployeeId'
+                }
+                continue
+            }
+
+            if ($workerCountsByIdentity[$workerId] -gt 1) {
+                Add-SfAdReportEntry -Report $report -Bucket 'conflicts' -Entry @{
+                    workerId = $workerId
+                    reason = 'DuplicateWorkerId'
+                    occurrences = $workerCountsByIdentity[$workerId]
+                }
+                continue
+            }
+
+            $existingUserMatches = Get-SfAdTargetUser -Config $config -WorkerId $workerId
+            if ((Get-SfAdCollectionCount -Value $existingUserMatches) -gt 1) {
+                Add-SfAdReportEntry -Report $report -Bucket 'conflicts' -Entry @{
+                    workerId = $workerId
+                    reason = 'DuplicateAdIdentityMatch'
+                    occurrences = Get-SfAdCollectionCount -Value $existingUserMatches
+                }
+                continue
+            }
+
+            $existingUser = Get-SfAdSingleResult -Value $existingUserMatches
+            $workerState = Get-SfAdWorkerState -State $state -WorkerId $workerId
+
+            if ($workerState -and $workerState.suppressed -and (Test-SfAdWorkerIsActive -Worker $worker)) {
+                Add-SfAdReportEntry -Report $report -Bucket 'manualReview' -Entry @{
+                    workerId = $workerId
+                    reason = 'RehireDetected'
+                    distinguishedName = $workerState.distinguishedName
+                }
+                continue
+            }
+
+            if (-not (Test-SfAdWorkerIsActive -Worker $worker)) {
+                if ($existingUser) {
+                    Invoke-SfAdOffboarding -Config $config -User $existingUser -Worker $worker -State $state -Report $report -DryRun:$DryRun
+                }
+                continue
+            }
+
+            $attributeResult = Get-SfAdAttributeChanges -Worker $worker -ExistingUser $existingUser -MappingConfig $mappingConfig
+            if ($attributeResult.MissingRequired.Count -gt 0) {
+                Add-SfAdReportEntry -Report $report -Bucket 'quarantined' -Entry @{
+                    workerId = $workerId
+                    reason = 'MissingRequiredData'
+                    fields = $attributeResult.MissingRequired
+                }
+                continue
+            }
+
+            $changes = @{}
+            foreach ($key in $attributeResult.Changes.Keys) {
+                $changes[$key] = $attributeResult.Changes[$key]
+            }
+
+            $changes[$config.ad.identityAttribute] = $workerId
+            Set-SfAdManagerAttributeIfPossible -Config $config -Worker $worker -Changes $changes -Report $report -WorkerId $workerId
+
+            if (-not $existingUser) {
+                if (Test-SfAdCreateConflicts -Config $config -WorkerId $workerId -Changes $changes -Report $report) {
+                    continue
+                }
+
+                Assert-SfAdSafetyThreshold -Config $config -Report $report -ThresholdName 'maxCreatesPerRun' -CurrentCount @($report.creates).Count -Entry @{
+                    workerId = $workerId
+                    threshold = 'maxCreatesPerRun'
+                    attemptedCount = @($report.creates).Count + 1
+                }
+
+                $createdUser = New-SfAdUser -Config $config -Worker $worker -WorkerId $workerId -Attributes $changes -DryRun:$DryRun
+                Add-SfAdReportEntry -Report $report -Bucket 'creates' -Entry @{
+                    workerId = $workerId
+                    samAccountName = if ($createdUser.SamAccountName) { $createdUser.SamAccountName } else { $workerId }
+                }
+
+                if (-not $DryRun -and $createdUser) {
+                    try {
+                        $createAfter = Get-SfAdUserSnapshot -User $createdUser
+                    } catch {
+                        $createAfter = Convert-ToSfAdSerializable -Value $createdUser
+                    }
+                } else {
                     $createAfter = Convert-ToSfAdSerializable -Value $createdUser
                 }
-            } else {
-                $createAfter = Convert-ToSfAdSerializable -Value $createdUser
-            }
-            Add-SfAdReportOperation -Report $report -OperationType 'CreateUser' -WorkerId $workerId -Bucket 'creates' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $createdUser) -Before $null -After $createAfter | Out-Null
+                Add-SfAdReportOperation -Report $report -OperationType 'CreateUser' -WorkerId $workerId -Bucket 'creates' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $createdUser) -Before $null -After $createAfter | Out-Null
 
-            if (-not $DryRun -and $createdUser) {
-                if (Test-SfAdWorkerIsPrehireEligible -Worker $worker -EnableBeforeDays $config.sync.enableBeforeStartDays) {
-                    Enable-SfAdUser -User $createdUser -DryRun:$DryRun
-                    Add-SfAdReportEntry -Report $report -Bucket 'enables' -Entry @{
-                        workerId = $workerId
-                        samAccountName = $createdUser.SamAccountName
-                        licensingGroups = @()
-                    }
-                    Add-SfAdReportOperation -Report $report -OperationType 'EnableUser' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $createdUser) -Before ([pscustomobject]@{ enabled = $false }) -After ([pscustomobject]@{ enabled = $true }) | Out-Null
+                if (-not $DryRun -and $createdUser) {
+                    if (Test-SfAdWorkerIsPrehireEligible -Worker $worker -EnableBeforeDays $config.sync.enableBeforeStartDays) {
+                        Enable-SfAdUser -User $createdUser -DryRun:$DryRun
+                        Add-SfAdReportEntry -Report $report -Bucket 'enables' -Entry @{
+                            workerId = $workerId
+                            samAccountName = $createdUser.SamAccountName
+                            licensingGroups = @()
+                        }
+                        Add-SfAdReportOperation -Report $report -OperationType 'EnableUser' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $createdUser) -Before ([pscustomobject]@{ enabled = $false }) -After ([pscustomobject]@{ enabled = $true }) | Out-Null
 
-                    $licensedGroups = @(Add-SfAdUserToConfiguredGroups -Config $config -User $createdUser -DryRun:$DryRun)
-                    if ($licensedGroups.Count -gt 0) {
-                        $report.enables[-1].licensingGroups = $licensedGroups
-                        Add-SfAdReportOperation -Report $report -OperationType 'AddGroupMembership' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $createdUser) -Before ([pscustomobject]@{ groupsAdded = @() }) -After ([pscustomobject]@{ groupsAdded = $licensedGroups }) | Out-Null
+                        $licensedGroups = @(Add-SfAdUserToConfiguredGroups -Config $config -User $createdUser -DryRun:$DryRun)
+                        if ($licensedGroups.Count -gt 0) {
+                            $report.enables[-1].licensingGroups = $licensedGroups
+                            Add-SfAdReportOperation -Report $report -OperationType 'AddGroupMembership' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $createdUser) -Before ([pscustomobject]@{ groupsAdded = @() }) -After ([pscustomobject]@{ groupsAdded = $licensedGroups }) | Out-Null
+                        }
                     }
+
+                    Set-SfAdTrackedWorkerState -State $state -Report $report -WorkerId $workerId -WorkerState ([pscustomobject]@{
+                        adObjectGuid = $createdUser.ObjectGuid.Guid
+                        distinguishedName = $createdUser.DistinguishedName
+                        suppressed = $false
+                        firstDisabledAt = $null
+                        deleteAfter = $null
+                        lastSeenStatus = $worker.status
+                    })
                 }
-
-                Set-SfAdTrackedWorkerState -State $state -Report $report -WorkerId $workerId -WorkerState ([pscustomobject]@{
-                    adObjectGuid = $createdUser.ObjectGuid.Guid
-                    distinguishedName = $createdUser.DistinguishedName
-                    suppressed = $false
-                    firstDisabledAt = $null
-                    deleteAfter = $null
-                    lastSeenStatus = $worker.status
-                })
+                continue
             }
-            continue
-        }
 
-        if ($changes.Count -gt 0) {
-            $beforeAttributes = Get-SfAdAttributeBeforeValues -User $existingUser -Changes $changes
-            Set-SfAdUserAttributes -User $existingUser -Changes $changes -DryRun:$DryRun | Out-Null
-            Add-SfAdReportEntry -Report $report -Bucket 'updates' -Entry @{
-                workerId = $workerId
-                samAccountName = $existingUser.SamAccountName
-                changedAttributes = $changes.Keys
+            if ($changes.Count -gt 0) {
+                $beforeAttributes = Get-SfAdAttributeBeforeValues -User $existingUser -Changes $changes
+                Set-SfAdUserAttributes -User $existingUser -Changes $changes -DryRun:$DryRun | Out-Null
+                Add-SfAdReportEntry -Report $report -Bucket 'updates' -Entry @{
+                    workerId = $workerId
+                    samAccountName = $existingUser.SamAccountName
+                    changedAttributes = $changes.Keys
+                }
+                Add-SfAdReportOperation -Report $report -OperationType 'UpdateAttributes' -WorkerId $workerId -Bucket 'updates' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $existingUser) -Before $beforeAttributes -After (Convert-ToSfAdSerializable -Value $changes) | Out-Null
+            } else {
+                Add-SfAdReportEntry -Report $report -Bucket 'unchanged' -Entry @{
+                    workerId = $workerId
+                    samAccountName = $existingUser.SamAccountName
+                }
             }
-            Add-SfAdReportOperation -Report $report -OperationType 'UpdateAttributes' -WorkerId $workerId -Bucket 'updates' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $existingUser) -Before $beforeAttributes -After (Convert-ToSfAdSerializable -Value $changes) | Out-Null
-        } else {
-            Add-SfAdReportEntry -Report $report -Bucket 'unchanged' -Entry @{
-                workerId = $workerId
-                samAccountName = $existingUser.SamAccountName
-            }
-        }
 
-        $currentUser = $existingUser
-        $targetOu = Resolve-SfAdTargetOu -Config $config -Worker $worker
-        if ($currentUser.DistinguishedName -notlike "*$targetOu") {
-            $moveBefore = [pscustomobject]@{
+            $currentUser = $existingUser
+            $targetOu = Resolve-SfAdTargetOu -Config $config -Worker $worker
+            if ($currentUser.DistinguishedName -notlike "*$targetOu") {
+                $moveBefore = [pscustomobject]@{
+                    distinguishedName = $currentUser.DistinguishedName
+                    parentOu = Get-SfAdParentOuFromDistinguishedName -DistinguishedName $currentUser.DistinguishedName
+                }
+                Move-SfAdUser -User $currentUser -TargetOu $targetOu -DryRun:$DryRun
+                Add-SfAdReportEntry -Report $report -Bucket 'graveyardMoves' -Entry @{
+                    workerId = $workerId
+                    samAccountName = $currentUser.SamAccountName
+                    targetOu = $targetOu
+                }
+                Add-SfAdReportOperation -Report $report -OperationType 'MoveUser' -WorkerId $workerId -Bucket 'graveyardMoves' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $currentUser) -Before $moveBefore -After ([pscustomobject]@{ targetOu = $targetOu }) | Out-Null
+                if (-not $DryRun) {
+                    $currentUser = Get-SfAdUserByObjectGuid -ObjectGuid $currentUser.ObjectGuid.Guid
+                }
+            }
+
+            if (-not $currentUser.Enabled -and (Test-SfAdWorkerIsPrehireEligible -Worker $worker -EnableBeforeDays $config.sync.enableBeforeStartDays)) {
+                Enable-SfAdUser -User $currentUser -DryRun:$DryRun
+                $licensedGroups = @(Add-SfAdUserToConfiguredGroups -Config $config -User $currentUser -DryRun:$DryRun)
+                Add-SfAdReportEntry -Report $report -Bucket 'enables' -Entry @{
+                    workerId = $workerId
+                    samAccountName = $currentUser.SamAccountName
+                    licensingGroups = $licensedGroups
+                }
+                Add-SfAdReportOperation -Report $report -OperationType 'EnableUser' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $currentUser) -Before ([pscustomobject]@{ enabled = $false }) -After ([pscustomobject]@{ enabled = $true }) | Out-Null
+                if ($licensedGroups.Count -gt 0) {
+                    Add-SfAdReportOperation -Report $report -OperationType 'AddGroupMembership' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $currentUser) -Before ([pscustomobject]@{ groupsAdded = @() }) -After ([pscustomobject]@{ groupsAdded = $licensedGroups }) | Out-Null
+                }
+            }
+
+            Set-SfAdTrackedWorkerState -State $state -Report $report -WorkerId $workerId -WorkerState ([pscustomobject]@{
+                adObjectGuid = $currentUser.ObjectGuid.Guid
                 distinguishedName = $currentUser.DistinguishedName
-                parentOu = Get-SfAdParentOuFromDistinguishedName -DistinguishedName $currentUser.DistinguishedName
-            }
-            Move-SfAdUser -User $currentUser -TargetOu $targetOu -DryRun:$DryRun
-            Add-SfAdReportEntry -Report $report -Bucket 'graveyardMoves' -Entry @{
-                workerId = $workerId
-                samAccountName = $currentUser.SamAccountName
-                targetOu = $targetOu
-            }
-            Add-SfAdReportOperation -Report $report -OperationType 'MoveUser' -WorkerId $workerId -Bucket 'graveyardMoves' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $currentUser) -Before $moveBefore -After ([pscustomobject]@{ targetOu = $targetOu }) | Out-Null
-            if (-not $DryRun) {
-                $currentUser = Get-SfAdUserByObjectGuid -ObjectGuid $currentUser.ObjectGuid.Guid
-            }
+                suppressed = $false
+                firstDisabledAt = $null
+                deleteAfter = $null
+                lastSeenStatus = $worker.status
+            })
         }
 
-        if (-not $currentUser.Enabled -and (Test-SfAdWorkerIsPrehireEligible -Worker $worker -EnableBeforeDays $config.sync.enableBeforeStartDays)) {
-            Enable-SfAdUser -User $currentUser -DryRun:$DryRun
-            $licensedGroups = @(Add-SfAdUserToConfiguredGroups -Config $config -User $currentUser -DryRun:$DryRun)
-            Add-SfAdReportEntry -Report $report -Bucket 'enables' -Entry @{
-                workerId = $workerId
-                samAccountName = $currentUser.SamAccountName
-                licensingGroups = $licensedGroups
-            }
-            Add-SfAdReportOperation -Report $report -OperationType 'EnableUser' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $currentUser) -Before ([pscustomobject]@{ enabled = $false }) -After ([pscustomobject]@{ enabled = $true }) | Out-Null
-            if ($licensedGroups.Count -gt 0) {
-                Add-SfAdReportOperation -Report $report -OperationType 'AddGroupMembership' -WorkerId $workerId -Bucket 'enables' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $currentUser) -Before ([pscustomobject]@{ groupsAdded = @() }) -After ([pscustomobject]@{ groupsAdded = $licensedGroups }) | Out-Null
-            }
+        Invoke-SfAdDeletionPass -Config $config -State $state -Report $report -DryRun:$DryRun
+
+        Set-SfAdTrackedCheckpoint -State $state -Report $report -Checkpoint ((Get-Date).ToString('yyyy-MM-ddTHH:mm:ss'))
+        if (-not $DryRun) {
+            Save-SfAdSyncState -State $state -Path $config.state.path
         }
 
-        Set-SfAdTrackedWorkerState -State $state -Report $report -WorkerId $workerId -WorkerState ([pscustomobject]@{
-            adObjectGuid = $currentUser.ObjectGuid.Guid
-            distinguishedName = $currentUser.DistinguishedName
-            suppressed = $false
-            firstDisabledAt = $null
-            deleteAfter = $null
-            lastSeenStatus = $worker.status
-        })
+        $report.status = 'Succeeded'
+    } catch {
+        $report.status = 'Failed'
+        $report.errorMessage = $_.Exception.Message
+        $report.failedAt = (Get-Date).ToString('o')
+        throw
+    } finally {
+        $reportPath = Save-SfAdSyncReport -Report $report -Directory $config.reporting.outputDirectory -Mode $Mode
     }
 
-    Invoke-SfAdDeletionPass -Config $config -State $state -Report $report -DryRun:$DryRun
-
-    Set-SfAdTrackedCheckpoint -State $state -Report $report -Checkpoint ((Get-Date).ToString('yyyy-MM-ddTHH:mm:ss'))
-    if (-not $DryRun) {
-        Save-SfAdSyncState -State $state -Path $config.state.path
-    }
-
-    $reportPath = Save-SfAdSyncReport -Report $report -Directory $config.reporting.outputDirectory -Mode $Mode
     Write-SfAdSyncLog -Message "Run completed. Report written to $reportPath"
     return $reportPath
 }
 
-Export-ModuleMember -Function Write-SfAdSyncLog, Test-SfAdWorkerIsActive, Get-SfAdWorkerIdentityValue, Test-SfAdWorkerIsPrehireEligible, Invoke-SfAdSyncRun
+Export-ModuleMember -Function Write-SfAdSyncLog, Test-SfAdWorkerIsActive, Get-SfAdWorkerIdentityValue, Test-SfAdWorkerIsPrehireEligible, Test-SfAdSyncPreflight, Invoke-SfAdSyncRun

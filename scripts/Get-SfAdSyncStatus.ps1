@@ -94,6 +94,7 @@ $status = [pscustomobject]@{
         startedAt = if ($latestReport) { $latestReport.startedAt } else { $null }
         completedAt = if ($latestReport) { $latestReport.completedAt } else { $null }
         reversibleOperations = if ($latestReport) { Get-CollectionCount -Value $latestReport.operations } else { 0 }
+        status = if ($latestReport) { $latestReport.status } else { $null }
         creates = if ($latestReport) { Get-CollectionCount -Value $latestReport.creates } else { 0 }
         updates = if ($latestReport) { Get-CollectionCount -Value $latestReport.updates } else { 0 }
         enables = if ($latestReport) { Get-CollectionCount -Value $latestReport.enables } else { 0 }
@@ -101,6 +102,8 @@ $status = [pscustomobject]@{
         graveyardMoves = if ($latestReport) { Get-CollectionCount -Value $latestReport.graveyardMoves } else { 0 }
         deletions = if ($latestReport) { Get-CollectionCount -Value $latestReport.deletions } else { 0 }
         quarantined = if ($latestReport) { Get-CollectionCount -Value $latestReport.quarantined } else { 0 }
+        conflicts = if ($latestReport) { Get-CollectionCount -Value $latestReport.conflicts } else { 0 }
+        guardrailFailures = if ($latestReport) { Get-CollectionCount -Value $latestReport.guardrailFailures } else { 0 }
         manualReview = if ($latestReport) { Get-CollectionCount -Value $latestReport.manualReview } else { 0 }
         unchanged = if ($latestReport) { Get-CollectionCount -Value $latestReport.unchanged } else { 0 }
     }
@@ -126,6 +129,7 @@ if (-not $latestReportFile) {
 
 Write-Host "Latest report: $($status.latestReport.path)"
 Write-Host "Run ID: $($status.latestReport.runId)"
+Write-Host "Status: $($status.latestReport.status)"
 Write-Host "Started: $($status.latestReport.startedAt)"
 Write-Host "Completed: $($status.latestReport.completedAt)"
 Write-Host "Reversible operations: $($status.latestReport.reversibleOperations)"
@@ -136,5 +140,7 @@ Write-Host "Disables: $($status.latestReport.disables)"
 Write-Host "Graveyard moves: $($status.latestReport.graveyardMoves)"
 Write-Host "Deletions: $($status.latestReport.deletions)"
 Write-Host "Quarantined: $($status.latestReport.quarantined)"
+Write-Host "Conflicts: $($status.latestReport.conflicts)"
+Write-Host "Guardrail failures: $($status.latestReport.guardrailFailures)"
 Write-Host "Manual review: $($status.latestReport.manualReview)"
 Write-Host "Unchanged: $($status.latestReport.unchanged)"

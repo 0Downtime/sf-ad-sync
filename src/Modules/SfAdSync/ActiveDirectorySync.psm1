@@ -126,6 +126,28 @@ function Get-SfAdTargetUser {
     return Get-ADUser -LDAPFilter $ldapFilter -Properties * -ErrorAction SilentlyContinue
 }
 
+function Get-SfAdUserBySamAccountName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$SamAccountName
+    )
+
+    Ensure-ActiveDirectoryModule
+    return Get-ADUser -LDAPFilter "(samAccountName=$SamAccountName)" -Properties * -ErrorAction SilentlyContinue
+}
+
+function Get-SfAdUserByUserPrincipalName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$UserPrincipalName
+    )
+
+    Ensure-ActiveDirectoryModule
+    return Get-ADUser -LDAPFilter "(userPrincipalName=$UserPrincipalName)" -Properties * -ErrorAction SilentlyContinue
+}
+
 function Get-SfAdUserGroupMembershipDns {
     [CmdletBinding()]
     param(
@@ -481,4 +503,4 @@ function Restore-SfAdUserFromSnapshot {
     return Get-ADUser -Identity $user -Properties * -ErrorAction Stop
 }
 
-Export-ModuleMember -Function Ensure-ActiveDirectoryModule, Get-SfAdUserByObjectGuid, Get-SfAdTargetUser, Get-SfAdUserGroupMembershipDns, Get-SfAdUserSnapshot, Get-SfAdParentOuFromDistinguishedName, Resolve-SfAdTargetOu, New-SfAdUser, Set-SfAdUserAttributes, Enable-SfAdUser, Disable-SfAdUser, Move-SfAdUser, Remove-SfAdUser, Add-SfAdUserToConfiguredGroups, Remove-SfAdUserFromGroups, Restore-SfAdUserFromSnapshot
+Export-ModuleMember -Function Ensure-ActiveDirectoryModule, Get-SfAdUserByObjectGuid, Get-SfAdTargetUser, Get-SfAdUserBySamAccountName, Get-SfAdUserByUserPrincipalName, Get-SfAdUserGroupMembershipDns, Get-SfAdUserSnapshot, Get-SfAdParentOuFromDistinguishedName, Resolve-SfAdTargetOu, New-SfAdUser, Set-SfAdUserAttributes, Enable-SfAdUser, Disable-SfAdUser, Move-SfAdUser, Remove-SfAdUser, Add-SfAdUserToConfiguredGroups, Remove-SfAdUserFromGroups, Restore-SfAdUserFromSnapshot

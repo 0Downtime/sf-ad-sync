@@ -13,6 +13,7 @@ function New-SfAdSyncReport {
     return [ordered]@{
         runId = [guid]::NewGuid().Guid
         startedAt = (Get-Date).ToString('o')
+        status = 'InProgress'
         mode = $Mode
         dryRun = [bool]$DryRun
         configPath = $ConfigPath
@@ -27,6 +28,8 @@ function New-SfAdSyncReport {
         graveyardMoves = @()
         deletions = @()
         quarantined = @()
+        conflicts = @()
+        guardrailFailures = @()
         manualReview = @()
         unchanged = @()
     }

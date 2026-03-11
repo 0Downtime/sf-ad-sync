@@ -9,7 +9,10 @@ Describe 'Reporting journal' {
         $report.runId | Should -Not -BeNullOrEmpty
         $report.mode | Should -Be 'Delta'
         $report.dryRun | Should -BeTrue
+        $report.status | Should -Be 'InProgress'
         $report.operations.Count | Should -Be 0
+        $report.conflicts.Count | Should -Be 0
+        $report.guardrailFailures.Count | Should -Be 0
     }
 
     It 'appends ordered operations' {

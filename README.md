@@ -38,6 +38,14 @@ pwsh ./src/Invoke-SfAdSync.ps1 `
   -DryRun
 ```
 
+Run a preflight validation before the first sync or after config changes:
+
+```powershell
+pwsh ./scripts/Invoke-SfAdPreflight.ps1 `
+  -ConfigPath ./config/sample.sync-config.json `
+  -MappingConfigPath ./config/sample.mapping-config.json
+```
+
 To view the current sync status from the configured state/report files:
 
 ```powershell
@@ -65,6 +73,8 @@ pwsh ./scripts/Undo-SfAdSyncRun.ps1 `
 Remove `-DryRun` to apply the rollback.
 
 ## Notes
+- Secret values can be supplied through environment variables referenced by `config.secrets`; those values override plaintext config settings.
+- The sample config includes per-run safety thresholds for creates, disables, and deletions. Exceeding a threshold fails the run before the next mutation is applied.
 - The sample SuccessFactors entity and field names are placeholders and must be aligned to your tenant metadata before production use.
 - Mapping source paths support indexed navigation syntax such as `employmentNav[0].jobInfoNav[0].jobTitle` for effective-dated or collection-backed OData expansions.
 - The sample mapping config includes disabled Core HR examples for `title`, `division`, `employeeType`, and extension attributes. Enable them only after confirming your tenant payload and target AD attributes.

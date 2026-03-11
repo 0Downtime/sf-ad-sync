@@ -1,4 +1,9 @@
 {
+  "secrets": {
+    "successFactorsClientIdEnv": "SF_AD_SYNC_SF_CLIENT_ID",
+    "successFactorsClientSecretEnv": "SF_AD_SYNC_SF_CLIENT_SECRET",
+    "defaultAdPasswordEnv": "SF_AD_SYNC_AD_DEFAULT_PASSWORD"
+  },
   "successFactors": {
     "baseUrl": "https://api12.successfactors.com/odata/v2",
     "oauth": {
@@ -57,6 +62,11 @@
   "sync": {
     "enableBeforeStartDays": 7,
     "deletionRetentionDays": 90
+  },
+  "safety": {
+    "maxCreatesPerRun": 25,
+    "maxDisablesPerRun": 25,
+    "maxDeletionsPerRun": 10
   },
   "state": {
     "path": ".\\state\\runtime\\sync-state.json"
