@@ -261,7 +261,7 @@ function Test-SfAdCreateConflicts {
     $conflicts = @()
 
     if ($Changes.ContainsKey('SamAccountName')) {
-        $samMatches = Get-SfAdUserBySamAccountName -SamAccountName $Changes['SamAccountName']
+        $samMatches = Get-SfAdUserBySamAccountName -Config $Config -SamAccountName $Changes['SamAccountName']
         if ((Get-SfAdCollectionCount -Value $samMatches) -gt 0) {
             $conflicts += [pscustomobject]@{
                 workerId = $WorkerId
@@ -272,7 +272,7 @@ function Test-SfAdCreateConflicts {
     }
 
     if ($Changes.ContainsKey('UserPrincipalName')) {
-        $upnMatches = Get-SfAdUserByUserPrincipalName -UserPrincipalName $Changes['UserPrincipalName']
+        $upnMatches = Get-SfAdUserByUserPrincipalName -Config $Config -UserPrincipalName $Changes['UserPrincipalName']
         if ((Get-SfAdCollectionCount -Value $upnMatches) -gt 0) {
             $conflicts += [pscustomobject]@{
                 workerId = $WorkerId
@@ -314,7 +314,7 @@ function Invoke-SfAdOffboarding {
     }
 
     $disableBefore = [pscustomobject]@{ enabled = [bool]$User.Enabled }
-    Disable-SfAdUser -User $User -DryRun:$DryRun
+    Disable-SfAdUser -Config $Config -User $User -DryRun:$DryRun
     Add-SfAdReportEntry -Report $Report -Bucket 'disables' -Entry @{
         workerId = $workerId
         samAccountName = $User.SamAccountName
@@ -323,7 +323,7 @@ function Invoke-SfAdOffboarding {
 
     $currentUser = $User
     if (-not $DryRun -and $User.ObjectGuid) {
-        $currentUser = Get-SfAdUserByObjectGuid -ObjectGuid $User.ObjectGuid.Guid
+        $currentUser = Get-SfAdUserByObjectGuid -Config $Config -ObjectGuid $User.ObjectGuid.Guid
     }
 
     if ($currentUser.DistinguishedName -notlike "*$($Config.ad.graveyardOu)") {
@@ -331,7 +331,7 @@ function Invoke-SfAdOffboarding {
             distinguishedName = $currentUser.DistinguishedName
             parentOu = Get-SfAdParentOuFromDistinguishedName -DistinguishedName $currentUser.DistinguishedName
         }
-        Move-SfAdUser -User $currentUser -TargetOu $Config.ad.graveyardOu -DryRun:$DryRun
+        Move-SfAdUser -Config $Config -User $currentUser -TargetOu $Config.ad.graveyardOu -DryRun:$DryRun
         Add-SfAdReportEntry -Report $Report -Bucket 'graveyardMoves' -Entry @{
             workerId = $workerId
             samAccountName = $currentUser.SamAccountName
@@ -376,7 +376,7 @@ function Invoke-SfAdDeletionPass {
             attemptedCount = @($Report.deletions).Count + 1
         }
 
-        $user = Get-SfAdUserByObjectGuid -ObjectGuid $workerState.adObjectGuid
+        $user = Get-SfAdUserByObjectGuid -Config $Config -ObjectGuid $workerState.adObjectGuid
         if (-not $user) {
             continue
         }
@@ -391,8 +391,8 @@ function Invoke-SfAdDeletionPass {
             continue
         }
 
-        $snapshot = if (-not $DryRun) { Get-SfAdUserSnapshot -User $user } else { [pscustomobject]@{ samAccountName = $user.SamAccountName; objectGuid = $workerState.adObjectGuid } }
-        Remove-SfAdUser -User $user -DryRun:$DryRun
+        $snapshot = if (-not $DryRun) { Get-SfAdUserSnapshot -Config $Config -User $user } else { [pscustomobject]@{ samAccountName = $user.SamAccountName; objectGuid = $workerState.adObjectGuid } }
+        Remove-SfAdUser -Config $Config -User $user -DryRun:$DryRun
         Add-SfAdReportEntry -Report $Report -Bucket 'deletions' -Entry @{
             workerId = $property.Name
             samAccountName = $user.SamAccountName
@@ -552,7 +552,7 @@ function Invoke-SfAdSyncRun {
 
                 if (-not $DryRun -and $createdUser) {
                     try {
-                        $createAfter = Get-SfAdUserSnapshot -User $createdUser
+                        $createAfter = Get-SfAdUserSnapshot -Config $config -User $createdUser
                     } catch {
                         $createAfter = Convert-ToSfAdSerializable -Value $createdUser
                     }
@@ -563,7 +563,7 @@ function Invoke-SfAdSyncRun {
 
                 if (-not $DryRun -and $createdUser) {
                     if (Test-SfAdWorkerIsPrehireEligible -Worker $worker -EnableBeforeDays $config.sync.enableBeforeStartDays) {
-                        Enable-SfAdUser -User $createdUser -DryRun:$DryRun
+                        Enable-SfAdUser -Config $config -User $createdUser -DryRun:$DryRun
                         Add-SfAdReportEntry -Report $report -Bucket 'enables' -Entry @{
                             workerId = $workerId
                             samAccountName = $createdUser.SamAccountName
@@ -592,7 +592,7 @@ function Invoke-SfAdSyncRun {
 
             if ($changes.Count -gt 0) {
                 $beforeAttributes = Get-SfAdAttributeBeforeValues -User $existingUser -Changes $changes
-                Set-SfAdUserAttributes -User $existingUser -Changes $changes -DryRun:$DryRun | Out-Null
+                Set-SfAdUserAttributes -Config $config -User $existingUser -Changes $changes -DryRun:$DryRun | Out-Null
                 Add-SfAdReportEntry -Report $report -Bucket 'updates' -Entry @{
                     workerId = $workerId
                     samAccountName = $existingUser.SamAccountName
@@ -613,7 +613,7 @@ function Invoke-SfAdSyncRun {
                     distinguishedName = $currentUser.DistinguishedName
                     parentOu = Get-SfAdParentOuFromDistinguishedName -DistinguishedName $currentUser.DistinguishedName
                 }
-                Move-SfAdUser -User $currentUser -TargetOu $targetOu -DryRun:$DryRun
+                Move-SfAdUser -Config $config -User $currentUser -TargetOu $targetOu -DryRun:$DryRun
                 Add-SfAdReportEntry -Report $report -Bucket 'graveyardMoves' -Entry @{
                     workerId = $workerId
                     samAccountName = $currentUser.SamAccountName
@@ -621,12 +621,12 @@ function Invoke-SfAdSyncRun {
                 }
                 Add-SfAdReportOperation -Report $report -OperationType 'MoveUser' -WorkerId $workerId -Bucket 'graveyardMoves' -Target (Get-SfAdUserTargetDescriptor -WorkerId $workerId -User $currentUser) -Before $moveBefore -After ([pscustomobject]@{ targetOu = $targetOu }) | Out-Null
                 if (-not $DryRun) {
-                    $currentUser = Get-SfAdUserByObjectGuid -ObjectGuid $currentUser.ObjectGuid.Guid
+                    $currentUser = Get-SfAdUserByObjectGuid -Config $config -ObjectGuid $currentUser.ObjectGuid.Guid
                 }
             }
 
             if (-not $currentUser.Enabled -and (Test-SfAdWorkerIsPrehireEligible -Worker $worker -EnableBeforeDays $config.sync.enableBeforeStartDays)) {
-                Enable-SfAdUser -User $currentUser -DryRun:$DryRun
+                Enable-SfAdUser -Config $config -User $currentUser -DryRun:$DryRun
                 $licensedGroups = @(Add-SfAdUserToConfiguredGroups -Config $config -User $currentUser -DryRun:$DryRun)
                 Add-SfAdReportEntry -Report $report -Bucket 'enables' -Entry @{
                     workerId = $workerId

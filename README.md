@@ -23,7 +23,7 @@ PowerShell automation for syncing SAP SuccessFactors worker data into on-premise
 
 ## Setup
 1. Copy `config/sample.sync-config.json` and `config/sample.mapping-config.json` to environment-specific files.
-2. Fill in SuccessFactors OAuth details, tenant query fields, OU routing, and licensing groups.
+2. Fill in SuccessFactors OAuth details, tenant query fields, OU routing, and licensing groups. Only fill in the AD server and bind credentials if you are running from a non-domain-joined host or need to target a specific DC.
 3. Confirm the immutable SuccessFactors identity field and the AD attribute that stores it.
 4. Install RSAT Active Directory tools and ensure the host can reach SuccessFactors.
 5. Validate any nested SuccessFactors fields you want to sync and align them to your tenant metadata.
@@ -121,6 +121,8 @@ Remove `-DryRun` to apply the rollback.
 
 ## Notes
 - Secret values can be supplied through environment variables referenced by `config.secrets`; those values override plaintext config settings.
+- On a domain-joined host, leave `ad.server`, `ad.username`, and `ad.bindPassword` empty and the script will use the machine and user domain context.
+- For non-domain-joined hosts, set `ad.server`, `ad.username`, and `ad.bindPassword` or their env-backed secret equivalents so AD cmdlets run against a specific DC with explicit credentials.
 - The sample config includes per-run safety thresholds for creates, disables, and deletions. Exceeding a threshold fails the run before the next mutation is applied.
 - The sample SuccessFactors entity and field names are placeholders and must be aligned to your tenant metadata before production use.
 - Mapping source paths support indexed navigation syntax such as `employmentNav[0].jobInfoNav[0].jobTitle` for effective-dated or collection-backed OData expansions.

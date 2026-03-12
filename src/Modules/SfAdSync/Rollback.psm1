@@ -26,7 +26,7 @@ function Resolve-SfAdRollbackUser {
     )
 
     if ($Operation.target.objectGuid) {
-        $user = Get-SfAdUserByObjectGuid -ObjectGuid $Operation.target.objectGuid
+        $user = Get-SfAdUserByObjectGuid -Config $Config -ObjectGuid $Operation.target.objectGuid
         if ($user) {
             return $user
         }
@@ -104,16 +104,16 @@ function Invoke-SfAdRollback {
             'AddGroupMembership' {
                 $user = Resolve-SfAdRollbackUser -Operation $operation -Config $config
                 if ($user -and $operation.after -and $operation.after.groupsAdded) {
-                    Remove-SfAdUserFromGroups -User $user -Groups @($operation.after.groupsAdded) -DryRun:$DryRun
+                    Remove-SfAdUserFromGroups -Config $config -User $user -Groups @($operation.after.groupsAdded) -DryRun:$DryRun
                 }
             }
             'EnableUser' {
                 $user = Resolve-SfAdRollbackUser -Operation $operation -Config $config
                 if ($user) {
                     if ($operation.before.enabled) {
-                        Enable-SfAdUser -User $user -DryRun:$DryRun
+                        Enable-SfAdUser -Config $config -User $user -DryRun:$DryRun
                     } else {
-                        Disable-SfAdUser -User $user -DryRun:$DryRun
+                        Disable-SfAdUser -Config $config -User $user -DryRun:$DryRun
                     }
                 }
             }
@@ -121,16 +121,16 @@ function Invoke-SfAdRollback {
                 $user = Resolve-SfAdRollbackUser -Operation $operation -Config $config
                 if ($user) {
                     if ($operation.before.enabled) {
-                        Enable-SfAdUser -User $user -DryRun:$DryRun
+                        Enable-SfAdUser -Config $config -User $user -DryRun:$DryRun
                     } else {
-                        Disable-SfAdUser -User $user -DryRun:$DryRun
+                        Disable-SfAdUser -Config $config -User $user -DryRun:$DryRun
                     }
                 }
             }
             'MoveUser' {
                 $user = Resolve-SfAdRollbackUser -Operation $operation -Config $config
                 if ($user -and $operation.before.parentOu) {
-                    Move-SfAdUser -User $user -TargetOu $operation.before.parentOu -DryRun:$DryRun
+                    Move-SfAdUser -Config $config -User $user -TargetOu $operation.before.parentOu -DryRun:$DryRun
                 }
             }
             'UpdateAttributes' {
@@ -138,14 +138,14 @@ function Invoke-SfAdRollback {
                 if ($user) {
                     $changes = Convert-SfAdRollbackValueToHashtable -Value $operation.before
                     if ($changes.Count -gt 0) {
-                        Set-SfAdUserAttributes -User $user -Changes $changes -DryRun:$DryRun | Out-Null
+                        Set-SfAdUserAttributes -Config $config -User $user -Changes $changes -DryRun:$DryRun | Out-Null
                     }
                 }
             }
             'CreateUser' {
                 $user = Resolve-SfAdRollbackUser -Operation $operation -Config $config
                 if ($user) {
-                    Remove-SfAdUser -User $user -DryRun:$DryRun
+                    Remove-SfAdUser -Config $config -User $user -DryRun:$DryRun
                 }
             }
             'DeleteUser' {

@@ -60,6 +60,8 @@ function Resolve-SfAdSyncSecrets {
     $oauth = $Config.successFactors.oauth
     $oauth.clientId = Get-SfAdResolvedSetting -Value $oauth.clientId -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'successFactorsClientIdEnv')) { $secrets.successFactorsClientIdEnv } else { 'SF_AD_SYNC_SF_CLIENT_ID' })
     $oauth.clientSecret = Get-SfAdResolvedSetting -Value $oauth.clientSecret -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'successFactorsClientSecretEnv')) { $secrets.successFactorsClientSecretEnv } else { 'SF_AD_SYNC_SF_CLIENT_SECRET' })
+    $Config.ad.username = Get-SfAdResolvedSetting -Value $Config.ad.username -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'adUsernameEnv')) { $secrets.adUsernameEnv } else { 'SF_AD_SYNC_AD_USERNAME' })
+    $Config.ad.bindPassword = Get-SfAdResolvedSetting -Value $Config.ad.bindPassword -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'adBindPasswordEnv')) { $secrets.adBindPasswordEnv } else { 'SF_AD_SYNC_AD_BIND_PASSWORD' })
     $Config.ad.defaultPassword = Get-SfAdResolvedSetting -Value $Config.ad.defaultPassword -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'defaultAdPasswordEnv')) { $secrets.defaultAdPasswordEnv } else { 'SF_AD_SYNC_AD_DEFAULT_PASSWORD' })
 
     return $Config
@@ -177,6 +179,26 @@ function Test-SfAdSyncConfig {
     Assert-SfAdRequiredString -Value $Config.ad.defaultActiveOu -PropertyPath 'ad.defaultActiveOu'
     Assert-SfAdRequiredString -Value $Config.ad.graveyardOu -PropertyPath 'ad.graveyardOu'
     Assert-SfAdRequiredString -Value $Config.ad.defaultPassword -PropertyPath 'ad.defaultPassword'
+
+    $hasAdServer = Test-SfAdHasProperty -InputObject $Config.ad -PropertyName 'server'
+    $hasAdUsername = Test-SfAdHasProperty -InputObject $Config.ad -PropertyName 'username'
+    $hasAdBindPassword = Test-SfAdHasProperty -InputObject $Config.ad -PropertyName 'bindPassword'
+    $adServer = if ($hasAdServer) { "$($Config.ad.server)" } else { '' }
+    $adUsername = if ($hasAdUsername) { "$($Config.ad.username)" } else { '' }
+    $adBindPassword = if ($hasAdBindPassword) { "$($Config.ad.bindPassword)" } else { '' }
+
+    if (-not [string]::IsNullOrWhiteSpace($adUsername) -and [string]::IsNullOrWhiteSpace($adBindPassword)) {
+        throw 'Sync config must define ad.bindPassword when ad.username is provided.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($adBindPassword) -and [string]::IsNullOrWhiteSpace($adUsername)) {
+        throw 'Sync config must define ad.username when ad.bindPassword is provided.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($adUsername) -and [string]::IsNullOrWhiteSpace($adServer)) {
+        throw 'Sync config must define ad.server when alternate AD credentials are provided.'
+    }
+
     Assert-SfAdRequiredString -Value $Config.state.path -PropertyPath 'state.path'
     Assert-SfAdRequiredString -Value $Config.reporting.outputDirectory -PropertyPath 'reporting.outputDirectory'
 

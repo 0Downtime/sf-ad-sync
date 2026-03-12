@@ -17,6 +17,8 @@ Describe 'Get-SfAdSyncConfig' {
   "secrets": {
     "successFactorsClientIdEnv": "TEST_SF_CLIENT_ID",
     "successFactorsClientSecretEnv": "TEST_SF_CLIENT_SECRET",
+    "adUsernameEnv": "TEST_AD_USERNAME",
+    "adBindPasswordEnv": "TEST_AD_BIND_PASSWORD",
     "defaultAdPasswordEnv": "TEST_AD_PASSWORD"
   },
   "successFactors": {
@@ -35,6 +37,9 @@ Describe 'Get-SfAdSyncConfig' {
     }
   },
   "ad": {
+    "server": "dc01.example.com",
+    "username": "config-user",
+    "bindPassword": "config-bind-password",
     "identityAttribute": "employeeID",
     "defaultActiveOu": "OU=Employees,DC=example,DC=com",
     "graveyardOu": "OU=Graveyard,DC=example,DC=com",
@@ -55,18 +60,67 @@ Describe 'Get-SfAdSyncConfig' {
 
         [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_ID', 'env-client-id')
         [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_SECRET', 'env-client-secret')
+        [System.Environment]::SetEnvironmentVariable('TEST_AD_USERNAME', 'env-user')
+        [System.Environment]::SetEnvironmentVariable('TEST_AD_BIND_PASSWORD', 'env-bind-password')
         [System.Environment]::SetEnvironmentVariable('TEST_AD_PASSWORD', 'env-password')
 
         try {
             $config = Get-SfAdSyncConfig -Path $configPath
             $config.successFactors.oauth.clientId | Should -Be 'env-client-id'
             $config.successFactors.oauth.clientSecret | Should -Be 'env-client-secret'
+            $config.ad.username | Should -Be 'env-user'
+            $config.ad.bindPassword | Should -Be 'env-bind-password'
             $config.ad.defaultPassword | Should -Be 'env-password'
         } finally {
             [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_ID', $null)
             [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_SECRET', $null)
+            [System.Environment]::SetEnvironmentVariable('TEST_AD_USERNAME', $null)
+            [System.Environment]::SetEnvironmentVariable('TEST_AD_BIND_PASSWORD', $null)
             [System.Environment]::SetEnvironmentVariable('TEST_AD_PASSWORD', $null)
         }
+    }
+
+    It 'rejects alternate AD credentials without a server' {
+        $configPath = Join-Path $TestDrive 'invalid-ad-server-sync-config.json'
+        @'
+{
+  "successFactors": {
+    "baseUrl": "https://example.successfactors.com/odata/v2",
+    "oauth": {
+      "tokenUrl": "https://example.successfactors.com/oauth/token",
+      "clientId": "client-id",
+      "clientSecret": "client-secret"
+    },
+    "query": {
+      "entitySet": "PerPerson",
+      "identityField": "personIdExternal",
+      "deltaField": "lastModifiedDateTime",
+      "select": [ "personIdExternal" ],
+      "expand": [ "employmentNav" ]
+    }
+  },
+  "ad": {
+    "username": "EXAMPLE\\svc_sfadsync",
+    "bindPassword": "password",
+    "identityAttribute": "employeeID",
+    "defaultActiveOu": "OU=Employees,DC=example,DC=com",
+    "graveyardOu": "OU=Graveyard,DC=example,DC=com",
+    "defaultPassword": "password"
+  },
+  "sync": {
+    "enableBeforeStartDays": 7,
+    "deletionRetentionDays": 90
+  },
+  "state": {
+    "path": ".\\state\\sync-state.json"
+  },
+  "reporting": {
+    "outputDirectory": ".\\reports\\output"
+  }
+}
+'@ | Set-Content -Path $configPath
+
+        { Get-SfAdSyncConfig -Path $configPath } | Should -Throw '*ad.server*'
     }
 
     It 'rejects config missing nested required values' {

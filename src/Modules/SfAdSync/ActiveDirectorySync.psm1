@@ -100,15 +100,42 @@ function Ensure-ActiveDirectoryModule {
     }
 }
 
+function Get-SfAdDirectoryContextParameters {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [pscustomobject]$Config
+    )
+
+    $parameters = @{}
+    if (-not $Config -or -not $Config.ad) {
+        return $parameters
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace("$($Config.ad.server)")) {
+        $parameters['Server'] = "$($Config.ad.server)"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace("$($Config.ad.username)")) {
+        $securePassword = ConvertTo-SecureString -String $Config.ad.bindPassword -AsPlainText -Force
+        $parameters['Credential'] = [pscredential]::new("$($Config.ad.username)", $securePassword)
+    }
+
+    return $parameters
+}
+
 function Get-SfAdUserByObjectGuid {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [string]$ObjectGuid
     )
 
     Ensure-ActiveDirectoryModule
-    return Get-ADUser -Identity $ObjectGuid -Properties * -ErrorAction SilentlyContinue
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    return Get-ADUser -Identity $ObjectGuid -Properties * -ErrorAction SilentlyContinue @directoryContext
 }
 
 function Get-SfAdTargetUser {
@@ -123,40 +150,50 @@ function Get-SfAdTargetUser {
     Ensure-ActiveDirectoryModule
     $attribute = $Config.ad.identityAttribute
     $ldapFilter = "($attribute=$WorkerId)"
-    return Get-ADUser -LDAPFilter $ldapFilter -Properties * -ErrorAction SilentlyContinue
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    return Get-ADUser -LDAPFilter $ldapFilter -Properties * -ErrorAction SilentlyContinue @directoryContext
 }
 
 function Get-SfAdUserBySamAccountName {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [string]$SamAccountName
     )
 
     Ensure-ActiveDirectoryModule
-    return Get-ADUser -LDAPFilter "(samAccountName=$SamAccountName)" -Properties * -ErrorAction SilentlyContinue
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    return Get-ADUser -LDAPFilter "(samAccountName=$SamAccountName)" -Properties * -ErrorAction SilentlyContinue @directoryContext
 }
 
 function Get-SfAdUserByUserPrincipalName {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [string]$UserPrincipalName
     )
 
     Ensure-ActiveDirectoryModule
-    return Get-ADUser -LDAPFilter "(userPrincipalName=$UserPrincipalName)" -Properties * -ErrorAction SilentlyContinue
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    return Get-ADUser -LDAPFilter "(userPrincipalName=$UserPrincipalName)" -Properties * -ErrorAction SilentlyContinue @directoryContext
 }
 
 function Get-SfAdUserGroupMembershipDns {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User
     )
 
     Ensure-ActiveDirectoryModule
-    $groups = Get-ADPrincipalGroupMembership -Identity $User -ErrorAction SilentlyContinue
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    $groups = Get-ADPrincipalGroupMembership -Identity $User -ErrorAction SilentlyContinue @directoryContext
     if (-not $groups) {
         return @()
     }
@@ -167,6 +204,8 @@ function Get-SfAdUserGroupMembershipDns {
 function Get-SfAdUserSnapshot {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User
     )
@@ -198,7 +237,7 @@ function Get-SfAdUserSnapshot {
         userPrincipalName = $userPrincipalName
         enabled = [bool]$User.Enabled
         restoreAttributes = [pscustomobject]$restoreAttributes
-        groupMemberships = @(Get-SfAdUserGroupMembershipDns -User $User)
+        groupMemberships = @(Get-SfAdUserGroupMembershipDns -Config $Config -User $User)
         rawProperties = [pscustomobject]$allProperties
     }
 }
@@ -279,13 +318,16 @@ function New-SfAdUser {
 
     Ensure-ActiveDirectoryModule
 
-    New-ADUser @newUserParams
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    New-ADUser @newUserParams @directoryContext
     return Get-SfAdTargetUser -Config $Config -WorkerId $WorkerId
 }
 
 function Set-SfAdUserAttributes {
     [CmdletBinding(SupportsShouldProcess)]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User,
         [Parameter(Mandatory)]
@@ -305,12 +347,15 @@ function Set-SfAdUserAttributes {
         return $null
     }
 
-    Set-ADUser -Identity $User -Replace $Changes
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    Set-ADUser -Identity $User -Replace $Changes @directoryContext
 }
 
 function Enable-SfAdUser {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User,
         [switch]$DryRun
@@ -320,12 +365,15 @@ function Enable-SfAdUser {
         return
     }
 
-    Enable-ADAccount -Identity $User
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    Enable-ADAccount -Identity $User @directoryContext
 }
 
 function Disable-SfAdUser {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User,
         [switch]$DryRun
@@ -335,12 +383,15 @@ function Disable-SfAdUser {
         return
     }
 
-    Disable-ADAccount -Identity $User
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    Disable-ADAccount -Identity $User @directoryContext
 }
 
 function Move-SfAdUser {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User,
         [Parameter(Mandatory)]
@@ -352,12 +403,15 @@ function Move-SfAdUser {
         return
     }
 
-    Move-ADObject -Identity $User.DistinguishedName -TargetPath $TargetOu
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    Move-ADObject -Identity $User.DistinguishedName -TargetPath $TargetOu @directoryContext
 }
 
 function Remove-SfAdUser {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User,
         [switch]$DryRun
@@ -367,7 +421,8 @@ function Remove-SfAdUser {
         return
     }
 
-    Remove-ADUser -Identity $User -Confirm:$false
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    Remove-ADUser -Identity $User -Confirm:$false @directoryContext
 }
 
 function Add-SfAdUserToConfiguredGroups {
@@ -386,7 +441,7 @@ function Add-SfAdUserToConfiguredGroups {
 
     $existingMemberships = @()
     if (-not $DryRun) {
-        $existingMemberships = @(Get-SfAdUserGroupMembershipDns -User $User)
+        $existingMemberships = @(Get-SfAdUserGroupMembershipDns -Config $Config -User $User)
     }
 
     $changes = @()
@@ -397,7 +452,8 @@ function Add-SfAdUserToConfiguredGroups {
 
         $changes += $groupDn
         if (-not $DryRun) {
-            Add-ADGroupMember -Identity $groupDn -Members $User -ErrorAction Stop
+            $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+            Add-ADGroupMember -Identity $groupDn -Members $User -ErrorAction Stop @directoryContext
         }
     }
 
@@ -407,6 +463,8 @@ function Add-SfAdUserToConfiguredGroups {
 function Remove-SfAdUserFromGroups {
     [CmdletBinding()]
     param(
+        [AllowNull()]
+        [pscustomobject]$Config,
         [Parameter(Mandatory)]
         [pscustomobject]$User,
         [Parameter(Mandatory)]
@@ -419,7 +477,8 @@ function Remove-SfAdUserFromGroups {
     }
 
     foreach ($groupDn in $Groups) {
-        Remove-ADGroupMember -Identity $groupDn -Members $User -Confirm:$false -ErrorAction Stop
+        $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+        Remove-ADGroupMember -Identity $groupDn -Members $User -Confirm:$false -ErrorAction Stop @directoryContext
     }
 }
 
@@ -470,8 +529,9 @@ function Restore-SfAdUserFromSnapshot {
     }
 
     Ensure-ActiveDirectoryModule
-    New-ADUser @newUserParams
-    $user = Get-ADUser -Identity $samAccountName -Properties * -ErrorAction Stop
+    $directoryContext = Get-SfAdDirectoryContextParameters -Config $Config
+    New-ADUser @newUserParams @directoryContext
+    $user = Get-ADUser -Identity $samAccountName -Properties * -ErrorAction Stop @directoryContext
 
     $replaceAttributes = @{}
     foreach ($key in $restoreAttributes.Keys) {
@@ -487,20 +547,20 @@ function Restore-SfAdUserFromSnapshot {
     }
 
     if ($replaceAttributes.Count -gt 0) {
-        Set-ADUser -Identity $user -Replace $replaceAttributes
+        Set-ADUser -Identity $user -Replace $replaceAttributes @directoryContext
     }
 
     if ($Snapshot.enabled) {
-        Enable-ADAccount -Identity $user
+        Enable-ADAccount -Identity $user @directoryContext
     }
 
     if ($Snapshot.groupMemberships) {
         foreach ($groupDn in @($Snapshot.groupMemberships)) {
-            Add-ADGroupMember -Identity $groupDn -Members $user -ErrorAction Stop
+            Add-ADGroupMember -Identity $groupDn -Members $user -ErrorAction Stop @directoryContext
         }
     }
 
-    return Get-ADUser -Identity $user -Properties * -ErrorAction Stop
+    return Get-ADUser -Identity $user -Properties * -ErrorAction Stop @directoryContext
 }
 
 Export-ModuleMember -Function Ensure-ActiveDirectoryModule, Get-SfAdUserByObjectGuid, Get-SfAdTargetUser, Get-SfAdUserBySamAccountName, Get-SfAdUserByUserPrincipalName, Get-SfAdUserGroupMembershipDns, Get-SfAdUserSnapshot, Get-SfAdParentOuFromDistinguishedName, Resolve-SfAdTargetOu, New-SfAdUser, Set-SfAdUserAttributes, Enable-SfAdUser, Disable-SfAdUser, Move-SfAdUser, Remove-SfAdUser, Add-SfAdUserToConfiguredGroups, Remove-SfAdUserFromGroups, Restore-SfAdUserFromSnapshot
