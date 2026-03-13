@@ -112,13 +112,17 @@ function Get-SfAdDirectoryContextParameters {
         return $parameters
     }
 
-    if (-not [string]::IsNullOrWhiteSpace("$($Config.ad.server)")) {
-        $parameters['Server'] = "$($Config.ad.server)"
+    $server = if ($Config.ad.PSObject.Properties.Name -contains 'server') { "$($Config.ad.server)" } else { '' }
+    $username = if ($Config.ad.PSObject.Properties.Name -contains 'username') { "$($Config.ad.username)" } else { '' }
+    $bindPassword = if ($Config.ad.PSObject.Properties.Name -contains 'bindPassword') { "$($Config.ad.bindPassword)" } else { '' }
+
+    if (-not [string]::IsNullOrWhiteSpace($server)) {
+        $parameters['Server'] = $server
     }
 
-    if (-not [string]::IsNullOrWhiteSpace("$($Config.ad.username)")) {
-        $securePassword = ConvertTo-SecureString -String $Config.ad.bindPassword -AsPlainText -Force
-        $parameters['Credential'] = [pscredential]::new("$($Config.ad.username)", $securePassword)
+    if (-not [string]::IsNullOrWhiteSpace($username)) {
+        $securePassword = ConvertTo-SecureString -String $bindPassword -AsPlainText -Force
+        $parameters['Credential'] = [pscredential]::new($username, $securePassword)
     }
 
     return $parameters
@@ -251,18 +255,20 @@ function Resolve-SfAdTargetOu {
         [pscustomobject]$Worker
     )
 
-    foreach ($rule in $Config.ad.ouRoutingRules) {
-        $allMatch = $true
-        foreach ($property in $rule.match.PSObject.Properties) {
-            $workerValue = $Worker.($property.Name)
-            if ("$workerValue" -ne "$($property.Value)") {
-                $allMatch = $false
-                break
+    if ($Config.ad.PSObject.Properties.Name -contains 'ouRoutingRules' -and $Config.ad.ouRoutingRules) {
+        foreach ($rule in $Config.ad.ouRoutingRules) {
+            $allMatch = $true
+            foreach ($property in $rule.match.PSObject.Properties) {
+                $workerValue = $Worker.($property.Name)
+                if ("$workerValue" -ne "$($property.Value)") {
+                    $allMatch = $false
+                    break
+                }
             }
-        }
 
-        if ($allMatch) {
-            return $rule.targetOu
+            if ($allMatch) {
+                return $rule.targetOu
+            }
         }
     }
 

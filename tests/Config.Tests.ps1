@@ -4,7 +4,7 @@ Describe 'Get-SfAdSyncConfig' {
     }
 
     It 'loads the sample config successfully' {
-        $configPath = Join-Path $PSScriptRoot '../config/sample.sync-config.json'
+        $configPath = Join-Path $PSScriptRoot '../config/sample.real-successfactors.real-ad.sync-config.json'
         $config = Get-SfAdSyncConfig -Path $configPath
         $config.successFactors.baseUrl | Should -Not -BeNullOrEmpty
         $config.ad.graveyardOu | Should -Not -BeNullOrEmpty
@@ -17,6 +17,7 @@ Describe 'Get-SfAdSyncConfig' {
   "secrets": {
     "successFactorsClientIdEnv": "TEST_SF_CLIENT_ID",
     "successFactorsClientSecretEnv": "TEST_SF_CLIENT_SECRET",
+    "adServerEnv": "TEST_AD_SERVER",
     "adUsernameEnv": "TEST_AD_USERNAME",
     "adBindPasswordEnv": "TEST_AD_BIND_PASSWORD",
     "defaultAdPasswordEnv": "TEST_AD_PASSWORD"
@@ -37,7 +38,7 @@ Describe 'Get-SfAdSyncConfig' {
     }
   },
   "ad": {
-    "server": "dc01.example.com",
+    "server": "config-dc.example.com",
     "username": "config-user",
     "bindPassword": "config-bind-password",
     "identityAttribute": "employeeID",
@@ -60,6 +61,7 @@ Describe 'Get-SfAdSyncConfig' {
 
         [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_ID', 'env-client-id')
         [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_SECRET', 'env-client-secret')
+        [System.Environment]::SetEnvironmentVariable('TEST_AD_SERVER', 'env-dc.example.com')
         [System.Environment]::SetEnvironmentVariable('TEST_AD_USERNAME', 'env-user')
         [System.Environment]::SetEnvironmentVariable('TEST_AD_BIND_PASSWORD', 'env-bind-password')
         [System.Environment]::SetEnvironmentVariable('TEST_AD_PASSWORD', 'env-password')
@@ -68,12 +70,14 @@ Describe 'Get-SfAdSyncConfig' {
             $config = Get-SfAdSyncConfig -Path $configPath
             $config.successFactors.oauth.clientId | Should -Be 'env-client-id'
             $config.successFactors.oauth.clientSecret | Should -Be 'env-client-secret'
+            $config.ad.server | Should -Be 'env-dc.example.com'
             $config.ad.username | Should -Be 'env-user'
             $config.ad.bindPassword | Should -Be 'env-bind-password'
             $config.ad.defaultPassword | Should -Be 'env-password'
         } finally {
             [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_ID', $null)
             [System.Environment]::SetEnvironmentVariable('TEST_SF_CLIENT_SECRET', $null)
+            [System.Environment]::SetEnvironmentVariable('TEST_AD_SERVER', $null)
             [System.Environment]::SetEnvironmentVariable('TEST_AD_USERNAME', $null)
             [System.Environment]::SetEnvironmentVariable('TEST_AD_BIND_PASSWORD', $null)
             [System.Environment]::SetEnvironmentVariable('TEST_AD_PASSWORD', $null)

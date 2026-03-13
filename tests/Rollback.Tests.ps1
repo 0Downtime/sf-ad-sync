@@ -1,6 +1,6 @@
 Describe 'Rollback helpers' {
     BeforeAll {
-        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/Rollback.psm1" -Force
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/Rollback.psm1" -Force -DisableNameChecking
     }
 
     It 'converts PSCustomObject values into hashtables' {

@@ -89,11 +89,11 @@ function Get-SfWorkers {
     }
 
     $response = Invoke-SfODataGet -Config $Config -RelativePath $Config.successFactors.query.entitySet -Query $workerQuery
-    if ($response.d.results) {
+    if ($response.PSObject.Properties.Name -contains 'd' -and $response.d -and $response.d.results) {
         return $response.d.results
     }
 
-    if ($response.value) {
+    if ($response.PSObject.Properties.Name -contains 'value' -and $response.value) {
         return $response.value
     }
 
@@ -116,11 +116,11 @@ function Get-SfWorkerById {
     }
 
     $response = Invoke-SfODataGet -Config $Config -RelativePath $Config.successFactors.query.entitySet -Query $query
-    if ($response.d.results -and $response.d.results.Count -gt 0) {
+    if ($response.PSObject.Properties.Name -contains 'd' -and $response.d -and $response.d.results -and $response.d.results.Count -gt 0) {
         return $response.d.results[0]
     }
 
-    if ($response.value -and $response.value.Count -gt 0) {
+    if ($response.PSObject.Properties.Name -contains 'value' -and $response.value -and $response.value.Count -gt 0) {
         return $response.value[0]
     }
 

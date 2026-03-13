@@ -1,9 +1,9 @@
 Set-StrictMode -Version Latest
 
 $moduleRoot = $PSScriptRoot
-Import-Module (Join-Path $moduleRoot 'Config.psm1') -Force
-Import-Module (Join-Path $moduleRoot 'State.psm1') -Force
-Import-Module (Join-Path $moduleRoot 'ActiveDirectorySync.psm1') -Force
+Import-Module (Join-Path $moduleRoot 'Config.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'State.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'ActiveDirectorySync.psm1') -Force -DisableNameChecking
 
 function Write-SfAdRollbackLog {
     [CmdletBinding()]
@@ -81,7 +81,8 @@ function Invoke-SfAdRollback {
 
     $resolvedReportPath = (Resolve-Path -Path $ReportPath).Path
     $report = Get-Content -Path $resolvedReportPath -Raw | ConvertFrom-Json -Depth 40
-    $effectiveConfigPath = if ($ConfigPath) { (Resolve-Path -Path $ConfigPath).Path } else { $report.configPath }
+    $reportConfigPath = if ($report.PSObject.Properties.Name -contains 'configPath') { $report.configPath } else { $null }
+    $effectiveConfigPath = if ($ConfigPath) { (Resolve-Path -Path $ConfigPath).Path } else { $reportConfigPath }
     if (-not $effectiveConfigPath) {
         throw 'ConfigPath is required when the report does not include it.'
     }

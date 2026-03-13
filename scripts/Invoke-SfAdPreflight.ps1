@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $moduleRoot = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'src/Modules/SfAdSync'
-Import-Module (Join-Path $moduleRoot 'Sync.psm1') -Force
+Import-Module (Join-Path $moduleRoot 'Sync.psm1') -Force -DisableNameChecking
 
 $result = Test-SfAdSyncPreflight -ConfigPath $ConfigPath -MappingConfigPath $MappingConfigPath
 

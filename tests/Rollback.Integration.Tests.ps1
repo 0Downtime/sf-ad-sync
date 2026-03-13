@@ -1,8 +1,8 @@
 Describe 'Invoke-SfAdRollback' {
     BeforeAll {
-        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/State.psm1" -Force
-        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/ActiveDirectorySync.psm1" -Force
-        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/Rollback.psm1" -Force
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/State.psm1" -Force -DisableNameChecking
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/ActiveDirectorySync.psm1" -Force -DisableNameChecking
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/Rollback.psm1" -Force -DisableNameChecking
     }
 
     BeforeEach {
@@ -117,6 +117,41 @@ Describe 'Invoke-SfAdRollback' {
                 @($savedState.workers.PSObject.Properties | ForEach-Object { $_.Name })
             }
             ($savedWorkerIds -contains '1001') | Should -BeFalse
+        }
+    }
+
+    It 'stops rollback and does not save state when an operation fails' {
+        InModuleScope Rollback {
+            $user = [pscustomobject]@{
+                ObjectGuid = [guid]'33333333-3333-3333-3333-333333333333'
+                DistinguishedName = 'CN=Jamie Doe,OU=Employees,DC=example,DC=com'
+                SamAccountName = '1001'
+                Enabled = $true
+            }
+
+            Mock Get-SfAdSyncConfig { $global:RollbackTestConfig }
+            Mock Get-SfAdSyncState { Get-Content -Path $global:RollbackTestStatePath -Raw | ConvertFrom-Json -Depth 20 }
+            Mock Get-SfAdUserByObjectGuid { $user }
+            Mock Get-SfAdTargetUser { $user }
+            Mock Remove-SfAdUserFromGroups { throw 'rollback group removal failed' }
+            Mock Save-SfAdSyncState { throw 'should not save state' }
+
+            { Invoke-SfAdRollback -ReportPath $global:RollbackTestReportPath -ConfigPath $global:RollbackTestConfigPath } | Should -Throw 'rollback group removal failed'
+
+            Assert-MockCalled Save-SfAdSyncState -Times 0 -Exactly
+        }
+    }
+
+    It 'requires a config path when neither the argument nor report provides one' {
+        InModuleScope Rollback {
+            $reportPath = Join-Path $TestDrive 'report-missing-config.json'
+            @{
+                runId = 'run-missing-config'
+                operations = @()
+                statePath = $global:RollbackTestStatePath
+            } | ConvertTo-Json -Depth 20 | Set-Content -Path $reportPath
+
+            { Invoke-SfAdRollback -ReportPath $reportPath } | Should -Throw 'ConfigPath is required when the report does not include it.'
         }
     }
 }

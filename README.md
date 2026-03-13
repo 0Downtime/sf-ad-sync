@@ -22,7 +22,7 @@ PowerShell automation for syncing SAP SuccessFactors worker data into on-premise
 - `tests`: Pester tests for config and mapping behavior.
 
 ## Setup
-1. Copy `config/sample.sync-config.json` and `config/sample.mapping-config.json` to environment-specific files.
+1. Copy `config/sample.real-successfactors.real-ad.sync-config.json` and `config/sample.successfactors-to-ad.mapping-config.json` to environment-specific files.
 2. Fill in SuccessFactors OAuth details, tenant query fields, OU routing, and licensing groups. Only fill in the AD server and bind credentials if you are running from a non-domain-joined host or need to target a specific DC.
 3. Confirm the immutable SuccessFactors identity field and the AD attribute that stores it.
 4. Install RSAT Active Directory tools and ensure the host can reach SuccessFactors.
@@ -32,8 +32,18 @@ PowerShell automation for syncing SAP SuccessFactors worker data into on-premise
 ## Usage
 ```powershell
 pwsh ./src/Invoke-SfAdSync.ps1 `
-  -ConfigPath ./config/sample.sync-config.json `
-  -MappingConfigPath ./config/sample.mapping-config.json `
+  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json `
+  -Mode Delta `
+  -DryRun
+```
+
+If you want the script to prompt for missing runtime values such as OAuth secrets, AD bind credentials, or the default AD password, use:
+
+```powershell
+pwsh ./scripts/Invoke-SfAdSyncInteractive.ps1 `
+  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json `
   -Mode Delta `
   -DryRun
 ```
@@ -42,15 +52,15 @@ Run a preflight validation before the first sync or after config changes:
 
 ```powershell
 pwsh ./scripts/Invoke-SfAdPreflight.ps1 `
-  -ConfigPath ./config/sample.sync-config.json `
-  -MappingConfigPath ./config/sample.mapping-config.json
+  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json
 ```
 
 To view the current sync status from the configured state/report files:
 
 ```powershell
 pwsh ./scripts/Get-SfAdSyncStatus.ps1 `
-  -ConfigPath ./config/sample.sync-config.json
+  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json
 ```
 
 Use `-AsJson` if you want the status in machine-readable form.
@@ -59,6 +69,18 @@ To run the full Pester suite:
 
 ```powershell
 pwsh ./scripts/Invoke-TestSuite.ps1 -Detailed
+```
+
+To print a coverage summary and compare it to the current non-blocking baseline:
+
+```powershell
+pwsh ./scripts/Invoke-TestSuite.ps1 -Coverage
+```
+
+If you want a machine-readable coverage summary for CI or local tooling:
+
+```powershell
+pwsh ./scripts/Invoke-TestSuite.ps1 -Coverage -CoverageSummaryPath ./artifacts/test-coverage-summary.json
 ```
 
 To simulate a large local dry-run without calling SuccessFactors or Active Directory:
@@ -83,22 +105,22 @@ pwsh ./scripts/Start-MockSuccessFactorsApi.ps1 `
   -Port 18080
 ```
 
-2. Point the sync at [sample.mock-successfactors.sync-config.json](/Users/chrisbrien/dev/github.com/sf-ad-sync/config/sample.mock-successfactors.sync-config.json) or a copy of it.
+2. Point the sync at [sample.mock-successfactors.real-ad.sync-config.json](/C:/Users/girsn/dev/github.com/0Downtime/sf-ad-sync/config/sample.mock-successfactors.real-ad.sync-config.json) or a copy of it.
 
 3. Run preflight:
 
 ```powershell
 pwsh ./scripts/Invoke-SfAdPreflight.ps1 `
-  -ConfigPath ./config/sample.mock-successfactors.sync-config.json `
-  -MappingConfigPath ./config/sample.mapping-config.json
+  -ConfigPath ./config/sample.mock-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json
 ```
 
 4. Run the actual sync command against the mock API. Use `-DryRun` first, then remove it when you are ready to create lab users:
 
 ```powershell
 pwsh ./src/Invoke-SfAdSync.ps1 `
-  -ConfigPath ./config/sample.mock-successfactors.sync-config.json `
-  -MappingConfigPath ./config/sample.mapping-config.json `
+  -ConfigPath ./config/sample.mock-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json `
   -Mode Full `
   -DryRun
 ```
@@ -113,7 +135,7 @@ To roll back a specific run from its report file:
 ```powershell
 pwsh ./scripts/Undo-SfAdSyncRun.ps1 `
   -ReportPath ./reports/output/sf-ad-sync-Delta-20260306-090018.json `
-  -ConfigPath ./config/sample.sync-config.json `
+  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
   -DryRun
 ```
 

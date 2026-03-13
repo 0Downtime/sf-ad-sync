@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ConfigPath = './config/sample.sync-config.json',
-    [string]$MappingConfigPath = './config/sample.mapping-config.json',
+    [string]$ConfigPath = './config/sample.real-successfactors.real-ad.sync-config.json',
+    [string]$MappingConfigPath = './config/sample.successfactors-to-ad.mapping-config.json',
     [ValidateRange(1, 50000)]
     [int]$UserCount = 1000,
     [ValidateRange(0, 5000)]
@@ -85,7 +85,7 @@ ConvertTo-Json -InputObject @($collisionUpns) -Depth 5 | Set-Content -Path $coll
 $pesterHarness = @"
 Describe 'Synthetic dry-run harness' {
     BeforeAll {
-        Import-Module '$moduleRoot/Sync.psm1' -Force
+        Import-Module '$moduleRoot/Sync.psm1' -Force -DisableNameChecking
         `$script:SyntheticWorkers = @(Get-Content -Path '$workersPath' -Raw | ConvertFrom-Json -Depth 20)
         `$script:SyntheticManagers = @(Get-Content -Path '$managerDirectoryPath' -Raw | ConvertFrom-Json -Depth 10)
         `$script:CollisionEmails = @(Get-Content -Path '$collisionUpnsPath' -Raw | ConvertFrom-Json -Depth 5)
@@ -146,7 +146,11 @@ Describe 'Synthetic dry-run harness' {
 "@
 
 Set-Content -Path $pesterHarnessPath -Value $pesterHarness
-$pesterResult = Invoke-Pester -Path $pesterHarnessPath -PassThru
+$pesterConfiguration = New-PesterConfiguration
+$pesterConfiguration.Run.Path = $pesterHarnessPath
+$pesterConfiguration.Run.PassThru = $true
+$pesterConfiguration.TestRegistry.Enabled = $false
+$pesterResult = Invoke-Pester -Configuration $pesterConfiguration
 if ($pesterResult.FailedCount -gt 0) {
     throw 'Synthetic dry-run harness failed.'
 }

@@ -1,12 +1,12 @@
 Set-StrictMode -Version Latest
 
 $moduleRoot = $PSScriptRoot
-Import-Module (Join-Path $moduleRoot 'Config.psm1') -Force
-Import-Module (Join-Path $moduleRoot 'State.psm1') -Force
-Import-Module (Join-Path $moduleRoot 'Reporting.psm1') -Force
-Import-Module (Join-Path $moduleRoot 'Mapping.psm1') -Force
-Import-Module (Join-Path $moduleRoot 'SuccessFactors.psm1') -Force
-Import-Module (Join-Path $moduleRoot 'ActiveDirectorySync.psm1') -Force
+Import-Module (Join-Path $moduleRoot 'Config.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'State.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'Reporting.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'Mapping.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'SuccessFactors.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'ActiveDirectorySync.psm1') -Force -DisableNameChecking
 
 function Write-SfAdSyncLog {
     [CmdletBinding()]
@@ -202,14 +202,14 @@ function Set-SfAdManagerAttributeIfPossible {
 
     $managerProperty = $Worker.PSObject.Properties['managerEmployeeId']
     if (-not $managerProperty -or [string]::IsNullOrWhiteSpace("$($managerProperty.Value)")) {
-        return
+        return $true
     }
 
     $managerEmployeeId = "$($managerProperty.Value)"
     $manager = Get-SfAdTargetUser -Config $Config -WorkerId $managerEmployeeId
     if ($manager) {
         $Changes['manager'] = $manager.DistinguishedName
-        return
+        return $true
     }
 
     Add-SfAdReportEntry -Report $Report -Bucket 'quarantined' -Entry @{
@@ -217,6 +217,7 @@ function Set-SfAdManagerAttributeIfPossible {
         reason = 'ManagerNotResolved'
         managerEmployeeId = $managerEmployeeId
     }
+    return $false
 }
 
 function Assert-SfAdSafetyThreshold {
@@ -362,11 +363,14 @@ function Invoke-SfAdDeletionPass {
     Ensure-ActiveDirectoryModule
     foreach ($property in @(Get-SfAdWorkerEntries -Workers $State.workers)) {
         $workerState = $property.Value
-        if (-not $workerState.suppressed -or -not $workerState.deleteAfter) {
+        $isSuppressed = $workerState.PSObject.Properties.Name -contains 'suppressed' -and [bool]$workerState.suppressed
+        $deleteAfter = if ($workerState.PSObject.Properties.Name -contains 'deleteAfter') { $workerState.deleteAfter } else { $null }
+
+        if (-not $isSuppressed -or -not $deleteAfter) {
             continue
         }
 
-        if ((Get-Date $workerState.deleteAfter) -gt (Get-Date)) {
+        if ((Get-Date $deleteAfter) -gt (Get-Date)) {
             continue
         }
 
@@ -498,8 +502,9 @@ function Invoke-SfAdSyncRun {
 
             $existingUser = Get-SfAdSingleResult -Value $existingUserMatches
             $workerState = Get-SfAdWorkerState -State $state -WorkerId $workerId
+            $workerStateIsSuppressed = $workerState -and $workerState.PSObject.Properties.Name -contains 'suppressed' -and [bool]$workerState.suppressed
 
-            if ($workerState -and $workerState.suppressed -and (Test-SfAdWorkerIsActive -Worker $worker)) {
+            if ($workerStateIsSuppressed -and (Test-SfAdWorkerIsActive -Worker $worker)) {
                 Add-SfAdReportEntry -Report $report -Bucket 'manualReview' -Entry @{
                     workerId = $workerId
                     reason = 'RehireDetected'
@@ -530,8 +535,20 @@ function Invoke-SfAdSyncRun {
                 $changes[$key] = $attributeResult.Changes[$key]
             }
 
-            $changes[$config.ad.identityAttribute] = $workerId
-            Set-SfAdManagerAttributeIfPossible -Config $config -Worker $worker -Changes $changes -Report $report -WorkerId $workerId
+            $existingIdentityValue = $null
+            if ($existingUser) {
+                $existingIdentityProperty = $existingUser.PSObject.Properties[$config.ad.identityAttribute]
+                if ($existingIdentityProperty) {
+                    $existingIdentityValue = "$($existingIdentityProperty.Value)"
+                }
+            }
+
+            if (-not $existingUser -or $existingIdentityValue -ne $workerId) {
+                $changes[$config.ad.identityAttribute] = $workerId
+            }
+            if (-not (Set-SfAdManagerAttributeIfPossible -Config $config -Worker $worker -Changes $changes -Report $report -WorkerId $workerId)) {
+                continue
+            }
 
             if (-not $existingUser) {
                 if (Test-SfAdCreateConflicts -Config $config -WorkerId $workerId -Changes $changes -Report $report) {

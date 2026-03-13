@@ -24,4 +24,38 @@ Describe 'Reporting journal' {
         $report.operations.Count | Should -Be 1
         $report.operations[0].operationType | Should -Be 'UpdateAttributes'
     }
+
+    It 'writes a persisted report with the expected top-level shape' {
+        $reportDirectory = Join-Path $TestDrive 'reports'
+        $report = New-SfAdSyncReport -Mode 'Full' -DryRun -ConfigPath 'config.json' -MappingConfigPath 'mapping.json' -StatePath 'state.json'
+        Add-SfAdReportEntry -Report $report -Bucket 'creates' -Entry @{ workerId = '1001'; samAccountName = 'jdoe' }
+        Add-SfAdReportOperation -Report $report -OperationType 'CreateUser' -WorkerId '1001' -Bucket 'creates' -Target @{ samAccountName = 'jdoe' } -Before $null -After ([pscustomobject]@{ samAccountName = 'jdoe' }) | Out-Null
+
+        $reportPath = Save-SfAdSyncReport -Report $report -Directory $reportDirectory -Mode 'Full'
+        $persisted = Get-Content -Path $reportPath -Raw | ConvertFrom-Json -Depth 20
+
+        $persisted.runId | Should -Not -BeNullOrEmpty
+        $persisted.mode | Should -Be 'Full'
+        $persisted.dryRun | Should -BeTrue
+        $persisted.completedAt | Should -Not -BeNullOrEmpty
+        $persisted.operations.Count | Should -Be 1
+        $persisted.creates.Count | Should -Be 1
+        ($persisted.PSObject.Properties.Name -contains 'operationSequence') | Should -BeFalse
+    }
+
+    It 'persists operation entries with rollback-relevant fields intact' {
+        $reportDirectory = Join-Path $TestDrive 'reports'
+        $report = New-SfAdSyncReport -Mode 'Delta' -ConfigPath 'config.json' -MappingConfigPath 'mapping.json' -StatePath 'state.json'
+        Add-SfAdReportOperation -Report $report -OperationType 'MoveUser' -WorkerId '2001' -Bucket 'graveyardMoves' -TargetType 'ADUser' -Target @{ objectGuid = '11111111-1111-1111-1111-111111111111' } -Before ([pscustomobject]@{ parentOu = 'OU=Employees,DC=example,DC=com' }) -After ([pscustomobject]@{ targetOu = 'OU=Graveyard,DC=example,DC=com' }) | Out-Null
+
+        $reportPath = Save-SfAdSyncReport -Report $report -Directory $reportDirectory -Mode 'Delta'
+        $persisted = Get-Content -Path $reportPath -Raw | ConvertFrom-Json -Depth 20
+
+        $persisted.operations[0].operationType | Should -Be 'MoveUser'
+        $persisted.operations[0].workerId | Should -Be '2001'
+        $persisted.operations[0].target.objectGuid | Should -Be '11111111-1111-1111-1111-111111111111'
+        $persisted.operations[0].before.parentOu | Should -Be 'OU=Employees,DC=example,DC=com'
+        $persisted.operations[0].after.targetOu | Should -Be 'OU=Graveyard,DC=example,DC=com'
+        $persisted.operations[0].status | Should -Be 'Applied'
+    }
 }

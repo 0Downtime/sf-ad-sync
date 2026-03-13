@@ -48,6 +48,25 @@ function Assert-SfAdRequiredString {
     }
 }
 
+function Set-SfAdPropertyValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$InputObject,
+        [Parameter(Mandatory)]
+        [string]$PropertyName,
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if (Test-SfAdHasProperty -InputObject $InputObject -PropertyName $PropertyName) {
+        $InputObject.$PropertyName = $Value
+        return
+    }
+
+    $InputObject | Add-Member -MemberType NoteProperty -Name $PropertyName -Value $Value -Force
+}
+
 function Resolve-SfAdSyncSecrets {
     [CmdletBinding()]
     param(
@@ -58,11 +77,12 @@ function Resolve-SfAdSyncSecrets {
     $secrets = if (Test-SfAdHasProperty -InputObject $Config -PropertyName 'secrets') { $Config.secrets } else { $null }
 
     $oauth = $Config.successFactors.oauth
-    $oauth.clientId = Get-SfAdResolvedSetting -Value $oauth.clientId -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'successFactorsClientIdEnv')) { $secrets.successFactorsClientIdEnv } else { 'SF_AD_SYNC_SF_CLIENT_ID' })
-    $oauth.clientSecret = Get-SfAdResolvedSetting -Value $oauth.clientSecret -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'successFactorsClientSecretEnv')) { $secrets.successFactorsClientSecretEnv } else { 'SF_AD_SYNC_SF_CLIENT_SECRET' })
-    $Config.ad.username = Get-SfAdResolvedSetting -Value $Config.ad.username -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'adUsernameEnv')) { $secrets.adUsernameEnv } else { 'SF_AD_SYNC_AD_USERNAME' })
-    $Config.ad.bindPassword = Get-SfAdResolvedSetting -Value $Config.ad.bindPassword -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'adBindPasswordEnv')) { $secrets.adBindPasswordEnv } else { 'SF_AD_SYNC_AD_BIND_PASSWORD' })
-    $Config.ad.defaultPassword = Get-SfAdResolvedSetting -Value $Config.ad.defaultPassword -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'defaultAdPasswordEnv')) { $secrets.defaultAdPasswordEnv } else { 'SF_AD_SYNC_AD_DEFAULT_PASSWORD' })
+    Set-SfAdPropertyValue -InputObject $oauth -PropertyName 'clientId' -Value (Get-SfAdResolvedSetting -Value $(if (Test-SfAdHasProperty -InputObject $oauth -PropertyName 'clientId') { $oauth.clientId } else { $null }) -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'successFactorsClientIdEnv')) { $secrets.successFactorsClientIdEnv } else { 'SF_AD_SYNC_SF_CLIENT_ID' }))
+    Set-SfAdPropertyValue -InputObject $oauth -PropertyName 'clientSecret' -Value (Get-SfAdResolvedSetting -Value $(if (Test-SfAdHasProperty -InputObject $oauth -PropertyName 'clientSecret') { $oauth.clientSecret } else { $null }) -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'successFactorsClientSecretEnv')) { $secrets.successFactorsClientSecretEnv } else { 'SF_AD_SYNC_SF_CLIENT_SECRET' }))
+    Set-SfAdPropertyValue -InputObject $Config.ad -PropertyName 'server' -Value (Get-SfAdResolvedSetting -Value $(if (Test-SfAdHasProperty -InputObject $Config.ad -PropertyName 'server') { $Config.ad.server } else { $null }) -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'adServerEnv')) { $secrets.adServerEnv } else { 'SF_AD_SYNC_AD_SERVER' }))
+    Set-SfAdPropertyValue -InputObject $Config.ad -PropertyName 'username' -Value (Get-SfAdResolvedSetting -Value $(if (Test-SfAdHasProperty -InputObject $Config.ad -PropertyName 'username') { $Config.ad.username } else { $null }) -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'adUsernameEnv')) { $secrets.adUsernameEnv } else { 'SF_AD_SYNC_AD_USERNAME' }))
+    Set-SfAdPropertyValue -InputObject $Config.ad -PropertyName 'bindPassword' -Value (Get-SfAdResolvedSetting -Value $(if (Test-SfAdHasProperty -InputObject $Config.ad -PropertyName 'bindPassword') { $Config.ad.bindPassword } else { $null }) -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'adBindPasswordEnv')) { $secrets.adBindPasswordEnv } else { 'SF_AD_SYNC_AD_BIND_PASSWORD' }))
+    Set-SfAdPropertyValue -InputObject $Config.ad -PropertyName 'defaultPassword' -Value (Get-SfAdResolvedSetting -Value $(if (Test-SfAdHasProperty -InputObject $Config.ad -PropertyName 'defaultPassword') { $Config.ad.defaultPassword } else { $null }) -EnvironmentVariableName $(if ($secrets -and (Test-SfAdHasProperty -InputObject $secrets -PropertyName 'defaultAdPasswordEnv')) { $secrets.defaultAdPasswordEnv } else { 'SF_AD_SYNC_AD_DEFAULT_PASSWORD' }))
 
     return $Config
 }
