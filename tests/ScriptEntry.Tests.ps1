@@ -101,6 +101,8 @@ Describe 'Script entrypoints' {
         $statePath = Join-Path $TestDrive 'state.json'
         $reportDir = Join-Path $TestDrive 'reports'
         $reportPath = Join-Path $reportDir 'sf-ad-sync-Delta-20260312-220000.json'
+        $olderReportPath = Join-Path $reportDir 'sf-ad-sync-Full-20260312-210000.json'
+        $runtimeStatusPath = Join-Path $TestDrive 'runtime-status.json'
 
         New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
         (New-StatusConfigContent -StatePath $statePath -ReportDirectory $reportDir) | Set-Content -Path $configPath
@@ -120,6 +122,8 @@ Describe 'Script entrypoints' {
 
         @{
             runId = 'run-123'
+            mode = 'Delta'
+            dryRun = $false
             startedAt = '2026-03-12T21:30:00'
             completedAt = '2026-03-12T21:35:00'
             status = 'Succeeded'
@@ -136,6 +140,52 @@ Describe 'Script entrypoints' {
             manualReview = @()
             unchanged = @()
         } | ConvertTo-Json -Depth 10 | Set-Content -Path $reportPath
+        @{
+            runId = 'run-122'
+            mode = 'Full'
+            dryRun = $true
+            startedAt = '2026-03-12T20:30:00'
+            completedAt = '2026-03-12T20:40:00'
+            status = 'Failed'
+            operations = @()
+            creates = @()
+            updates = @()
+            enables = @()
+            disables = @(@{})
+            graveyardMoves = @()
+            deletions = @()
+            quarantined = @()
+            conflicts = @(@{})
+            guardrailFailures = @(@{})
+            manualReview = @()
+            unchanged = @()
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $olderReportPath
+        @{
+            runId = 'run-active'
+            status = 'InProgress'
+            mode = 'Delta'
+            dryRun = $true
+            stage = 'ProcessingWorkers'
+            startedAt = '2026-03-12T21:40:00'
+            lastUpdatedAt = '2026-03-12T21:41:00'
+            completedAt = $null
+            currentWorkerId = '1002'
+            lastAction = 'Updated attributes for worker 1002.'
+            processedWorkers = 3
+            totalWorkers = 5
+            creates = 1
+            updates = 1
+            enables = 0
+            disables = 0
+            graveyardMoves = 0
+            deletions = 0
+            quarantined = 0
+            conflicts = 0
+            guardrailFailures = 0
+            manualReview = 0
+            unchanged = 1
+            errorMessage = $null
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $runtimeStatusPath
 
         $result = & "$PSScriptRoot/../scripts/Get-SfAdSyncStatus.ps1" -ConfigPath $configPath -AsJson | ConvertFrom-Json -Depth 10
 
@@ -144,13 +194,22 @@ Describe 'Script entrypoints' {
         $result.pendingDeletionWorkers | Should -Be 1
         $result.latestReport.status | Should -Be 'Succeeded'
         $result.latestReport.creates | Should -Be 1
+        $result.latestRun.mode | Should -Be 'Delta'
+        $result.currentRun.status | Should -Be 'InProgress'
+        $result.currentRun.stage | Should -Be 'ProcessingWorkers'
+        $result.currentRun.currentWorkerId | Should -Be '1002'
+        @($result.recentRuns).Count | Should -Be 2
+        $result.recentRuns[1].guardrailFailures | Should -Be 1
+        $result.paths.runtimeStatusPath | Should -Be $runtimeStatusPath
     }
 
     It 'returns zeroed latest report details when no report files exist' {
         $configPath = Join-Path $TestDrive 'status-config-empty.json'
-        $statePath = Join-Path $TestDrive 'state-empty.json'
-        $reportDir = Join-Path $TestDrive 'reports-empty'
+        $emptyRoot = Join-Path $TestDrive 'empty-status'
+        $statePath = Join-Path $emptyRoot 'state-empty.json'
+        $reportDir = Join-Path $emptyRoot 'reports-empty'
 
+        New-Item -Path $emptyRoot -ItemType Directory -Force | Out-Null
         New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
         (New-StatusConfigContent -StatePath $statePath -ReportDirectory $reportDir) | Set-Content -Path $configPath
         @{ checkpoint = $null; workers = @{} } | ConvertTo-Json -Depth 10 | Set-Content -Path $statePath
@@ -161,6 +220,8 @@ Describe 'Script entrypoints' {
         $result.latestReport.path | Should -Be $null
         $result.latestReport.creates | Should -Be 0
         $result.latestReport.status | Should -Be $null
+        $result.currentRun.status | Should -Be 'Idle'
+        @($result.recentRuns).Count | Should -Be 0
     }
 
     It 'throws when the state json is corrupt' {
@@ -187,6 +248,87 @@ Describe 'Script entrypoints' {
         '{bad json' | Set-Content -Path $reportPath
 
         { & "$PSScriptRoot/../scripts/Get-SfAdSyncStatus.ps1" -ConfigPath $configPath -AsJson | Out-Null } | Should -Throw
+    }
+
+    It 'renders the monitor view in text mode with current and recent run details' {
+        $configPath = Join-Path $TestDrive 'monitor-config.json'
+        $statePath = Join-Path $TestDrive 'monitor-state.json'
+        $reportDir = Join-Path $TestDrive 'monitor-reports'
+        $reportPath = Join-Path $reportDir 'sf-ad-sync-Delta-20260312-220000.json'
+        $runtimeStatusPath = Join-Path $TestDrive 'runtime-status.json'
+
+        New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
+        (New-StatusConfigContent -StatePath $statePath -ReportDirectory $reportDir) | Set-Content -Path $configPath
+        @{ checkpoint = '2026-03-12T21:00:00'; workers = @{} } | ConvertTo-Json -Depth 10 | Set-Content -Path $statePath
+        @{
+            runId = 'run-123'
+            mode = 'Delta'
+            dryRun = $false
+            startedAt = '2026-03-12T21:30:00'
+            completedAt = '2026-03-12T21:35:00'
+            status = 'Succeeded'
+            operations = @(@{ operationType = 'CreateUser' })
+            creates = @(@{})
+            updates = @()
+            enables = @()
+            disables = @()
+            graveyardMoves = @()
+            deletions = @()
+            quarantined = @()
+            conflicts = @()
+            guardrailFailures = @()
+            manualReview = @()
+            unchanged = @()
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $reportPath
+        @{
+            runId = 'run-active'
+            status = 'InProgress'
+            mode = 'Delta'
+            dryRun = $false
+            stage = 'ProcessingWorkers'
+            startedAt = '2026-03-12T21:40:00'
+            lastUpdatedAt = '2026-03-12T21:41:00'
+            completedAt = $null
+            currentWorkerId = '1002'
+            lastAction = 'Updated attributes for worker 1002.'
+            processedWorkers = 3
+            totalWorkers = 5
+            creates = 1
+            updates = 1
+            enables = 0
+            disables = 0
+            graveyardMoves = 0
+            deletions = 0
+            quarantined = 0
+            conflicts = 0
+            guardrailFailures = 0
+            manualReview = 0
+            unchanged = 1
+            errorMessage = $null
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $runtimeStatusPath
+
+        $result = & "$PSScriptRoot/../scripts/Watch-SfAdSyncMonitor.ps1" -ConfigPath $configPath -RunOnce -AsText
+
+        $result | Should -Match 'SuccessFactors AD Sync Monitor'
+        $result | Should -Match 'Stage: ProcessingWorkers'
+        $result | Should -Match 'Updated attributes for worker 1002'
+        $result | Should -Match 'Succeeded'
+    }
+
+    It 'renders an error banner when the monitor hits corrupt runtime status json' {
+        $configPath = Join-Path $TestDrive 'monitor-error-config.json'
+        $statePath = Join-Path $TestDrive 'monitor-error-state.json'
+        $reportDir = Join-Path $TestDrive 'monitor-error-reports'
+        $runtimeStatusPath = Join-Path $TestDrive 'runtime-status.json'
+
+        New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
+        (New-StatusConfigContent -StatePath $statePath -ReportDirectory $reportDir) | Set-Content -Path $configPath
+        @{ checkpoint = $null; workers = @{} } | ConvertTo-Json -Depth 10 | Set-Content -Path $statePath
+        '{bad json' | Set-Content -Path $runtimeStatusPath
+
+        $result = & "$PSScriptRoot/../scripts/Watch-SfAdSyncMonitor.ps1" -ConfigPath $configPath -RunOnce -AsText
+
+        $result | Should -Match 'Monitor error'
     }
 
     It 'runs the synthetic dry-run entry script as a bounded smoke test' {

@@ -42,6 +42,7 @@ Describe 'Invoke-SfAdSyncRun' {
     BeforeEach {
         $global:CapturedReport = $null
         $global:SavedStatePath = $null
+        $global:RuntimeSnapshots = @()
         $configFile = Join-Path $TestDrive 'sync-config.json'
         $mappingFile = Join-Path $TestDrive 'mapping-config.json'
         Set-Content -Path $configFile -Value '{}'
@@ -103,6 +104,19 @@ Describe 'Invoke-SfAdSyncRun' {
                 $global:CapturedReport = $Report
                 return (Join-Path $Directory "sf-ad-sync-$Mode.json")
             }
+            Mock Write-SfAdRuntimeStatusSnapshot {
+                param($Report, $StatePath, $Stage, $Status, $ProcessedWorkers, $TotalWorkers, $CurrentWorkerId, $LastAction, $CompletedAt, $ErrorMessage)
+                $global:RuntimeSnapshots += [pscustomobject]@{
+                    Stage = $Stage
+                    Status = $Status
+                    ProcessedWorkers = $ProcessedWorkers
+                    TotalWorkers = $TotalWorkers
+                    CurrentWorkerId = $CurrentWorkerId
+                    LastAction = $LastAction
+                    CompletedAt = $CompletedAt
+                    ErrorMessage = $ErrorMessage
+                }
+            }
             Mock Ensure-ActiveDirectoryModule {}
 
             Invoke-SfAdSyncRun -ConfigPath $global:SyncTestConfigPath -MappingConfigPath $global:SyncTestMappingConfigPath -Mode Delta | Out-Null
@@ -128,6 +142,14 @@ Describe 'Invoke-SfAdSyncRun' {
             Assert-MockCalled Add-SfAdUserToConfiguredGroups -Times 1 -Exactly -ParameterFilter {
                 $User.SamAccountName -eq '1001'
             }
+            @($global:RuntimeSnapshots.Stage) | Should -Contain 'FetchingWorkers'
+            @($global:RuntimeSnapshots.Stage) | Should -Contain 'ProcessingWorkers'
+            @($global:RuntimeSnapshots.Stage) | Should -Contain 'SavingState'
+            @($global:RuntimeSnapshots.Stage) | Should -Contain 'WritingReport'
+            $global:RuntimeSnapshots[-1].Stage | Should -Be 'Completed'
+            $global:RuntimeSnapshots[-1].Status | Should -Be 'Succeeded'
+            $global:RuntimeSnapshots[-1].ProcessedWorkers | Should -Be 1
+            $global:RuntimeSnapshots[-1].TotalWorkers | Should -Be 1
         }
     }
 
@@ -223,12 +245,23 @@ Describe 'Invoke-SfAdSyncRun' {
                 $global:CapturedReport = $Report
                 return (Join-Path $Directory "sf-ad-sync-$Mode.json")
             }
+            Mock Write-SfAdRuntimeStatusSnapshot {
+                param($Report, $StatePath, $Stage, $Status, $ProcessedWorkers, $TotalWorkers, $CurrentWorkerId, $LastAction, $CompletedAt, $ErrorMessage)
+                $global:RuntimeSnapshots += [pscustomobject]@{
+                    Stage = $Stage
+                    Status = $Status
+                    ErrorMessage = $ErrorMessage
+                }
+            }
 
             { Invoke-SfAdSyncRun -ConfigPath $global:SyncTestConfigPath -MappingConfigPath $global:SyncTestMappingConfigPath -Mode Delta | Out-Null } | Should -Throw '*maxCreatesPerRun*'
 
             $global:CapturedReport.status | Should -Be 'Failed'
             $global:CapturedReport.guardrailFailures.Count | Should -Be 1
             $global:CapturedReport.guardrailFailures[0].threshold | Should -Be 'maxCreatesPerRun'
+            $global:RuntimeSnapshots[-1].Stage | Should -Be 'Failed'
+            $global:RuntimeSnapshots[-1].Status | Should -Be 'Failed'
+            $global:RuntimeSnapshots[-1].ErrorMessage | Should -Be "Safety threshold 'maxCreatesPerRun' exceeded."
         }
     }
 

@@ -19,6 +19,9 @@ function New-SfAdSyncReport {
         configPath = $ConfigPath
         mappingConfigPath = $MappingConfigPath
         statePath = $StatePath
+        completedAt = $null
+        failedAt = $null
+        errorMessage = $null
         operations = @()
         operationSequence = 0
         creates = @()

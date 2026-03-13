@@ -17,6 +17,7 @@ PowerShell automation for syncing SAP SuccessFactors worker data into on-premise
 - `config`: sample tenant config and mapping config.
 - `scripts/Register-SfAdSyncScheduledTask.ps1`: scheduled task bootstrap.
 - `scripts/Get-SfAdSyncStatus.ps1`: summary view of the latest sync report and runtime state.
+- `scripts/Watch-SfAdSyncMonitor.ps1`: terminal dashboard for current sync stage and recent run history.
 - `scripts/Invoke-TestSuite.ps1`: run the Pester test suite.
 - `scripts/Undo-SfAdSyncRun.ps1`: rollback one sync run using the recorded operation journal.
 - `tests`: Pester tests for config and mapping behavior.
@@ -64,6 +65,16 @@ pwsh ./scripts/Get-SfAdSyncStatus.ps1 `
 ```
 
 Use `-AsJson` if you want the status in machine-readable form.
+Use `-IncludeCurrentRun` to print the live runtime snapshot and `-IncludeHistory -HistoryLimit 10` to print recent runs in plain text.
+
+To watch the current stage/progress and the last few syncs in a terminal dashboard:
+
+```powershell
+pwsh ./scripts/Watch-SfAdSyncMonitor.ps1 `
+  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json
+```
+
+Press `q` to quit or `r` to refresh immediately.
 
 To run the full Pester suite:
 
