@@ -6,11 +6,6 @@
 
 PowerShell automation for syncing SAP SuccessFactors worker data into on-premises Active Directory.
 
-## Releases
-- `main` publishes a prerelease on every push using the current `VERSION` value plus CI metadata, for example `0.1.0-dev.42+sha.a1b2c3d`.
-- Stable releases are cut manually from GitHub Actions and must match the root `VERSION` file exactly.
-- Release bundles include the runtime deployment content: `src`, `scripts`, `config`, `README.md`, `LICENSE`, `SECURITY.md`, and `CONTRIBUTING.md`.
-
 ## What It Does
 - Pulls workers from SAP SuccessFactors OData v2 using OAuth2 client credentials.
 - Maps a stable SuccessFactors employee identifier to AD as the authoritative join key.
@@ -19,6 +14,51 @@ PowerShell automation for syncing SAP SuccessFactors worker data into on-premise
 - Disables terminated users, moves them to a graveyard OU, suppresses further sync, and deletes them after retention.
 - Supports additional Core HR mappings such as job title, business unit, division, cost center, and employment class when exposed by the tenant query.
 - Supports per-field mapping toggles, dry-run mode, delta sync, and periodic full reconciliation.
+
+## Feature Comparison
+Comparison against the Microsoft Entra SuccessFactors connector documented here: [Configure SAP SuccessFactors to Active Directory user provisioning](https://learn.microsoft.com/en-us/entra/identity/saas-apps/sap-successfactors-inbound-provisioning-tutorial).
+
+| Feature | `sf-ad-sync` | Microsoft Entra SuccessFactors connector |
+| --- | --- | --- |
+| SuccessFactors Employee Central as the authoritative HR source for AD provisioning | ✅ | ✅ |
+| AD account create, update, disable, and lifecycle sync | ✅ | ✅ |
+| Attribute mapping and stable matching ID support | ✅ | ✅ |
+| Customizable mapping, routing, and lifecycle behavior | ✅ | ⚠️ Limited |
+| Prehire and rehire handling | ✅ | ⚠️ Limited |
+| Scoped rollout controls for testing limited populations | ✅ | ⚠️ Limited |
+| Easy-to-read logs and explicit change reports for each run | ✅ | ❌ |
+| Rollback of recorded AD changes | ✅ | ❌ |
+| Delta sync plus periodic full reconciliation | ✅ | ✅ |
+| Audit logs and sync run reporting | ✅ | ✅ |
+| On-demand single-user provisioning test | 🗓️ Planned | ✅ |
+| Email write-back to SuccessFactors | 🗓️ Planned | ✅ |
+| Hosted admin portal workflow for mapping, logs, and config export/import | 🗓️ Planned | ✅ |
+
+## Planned Features
+Planned work is ordered by delivery priority so the roadmap is easy to scan from immediate operational needs to longer-term product improvements.
+
+### Near Term
+- Manual review queue for quarantined workers, unresolved managers, and identity conflicts.
+- Approval mode for high-risk actions such as disables, deletes, and graveyard OU moves.
+- Alerting hooks for failed runs, guardrail breaches, and manual-review events.
+- Per-worker replay and debug mode to inspect mapping, matching, and lifecycle decisions.
+
+### Mid Term
+- Policy engine for prehire, rehire, leave-of-absence, contractor, transfer, and termination handling.
+- Identity collision workflows for duplicate email, UPN, employee ID, and ambiguous matches.
+- Conditional group provisioning based on company, department, location, or worker type.
+- Manager resolution retry and fallback strategies for delayed or missing manager records.
+- SuccessFactors schema discovery to help build mapping configs from tenant metadata.
+- Attribute-level protection rules such as preserving operator-managed fields.
+
+### Longer Term
+- Hosted admin portal for mapping management, dry-run review, run history, and approvals.
+- Email write-back to SuccessFactors where downstream process requirements need it.
+- Effective-dated change preview for future hires, transfers, and terminations.
+- Drift detection for AD state, mapping behavior, and config changes across runs.
+- Plugin-based custom transforms and matching extensions without forking the project.
+- Versioned config migration support as the config schema evolves.
+- Regression fixture packs for replaying tenant-specific edge cases in tests.
 
 ## Project Layout
 - `src/Invoke-SfAdSync.ps1`: main sync entrypoint.
@@ -160,6 +200,11 @@ pwsh ./scripts/Undo-SfAdSyncRun.ps1 `
 ```
 
 Remove `-DryRun` to apply the rollback.
+
+## Releases
+- `main` publishes a prerelease on every push using the current `VERSION` value plus CI metadata, for example `0.1.0-dev.42+sha.a1b2c3d`.
+- Stable releases are cut manually from GitHub Actions and must match the root `VERSION` file exactly.
+- Release bundles include the runtime deployment content: `src`, `scripts`, `config`, `README.md`, `LICENSE`, `SECURITY.md`, and `CONTRIBUTING.md`.
 
 ## Notes
 - This software is provided as-is and is used at your own risk. You are responsible for validating configuration, testing changes safely, and assessing operational impact before using it in any environment. The maintainers are not responsible for data loss, directory damage, outages, or other issues caused by use or misuse of this project.
