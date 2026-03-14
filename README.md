@@ -202,7 +202,8 @@ pwsh ./scripts/Undo-SfAdSyncRun.ps1 `
 Remove `-DryRun` to apply the rollback.
 
 ## Releases
-- `main` publishes a prerelease on every push using the current `VERSION` value plus CI metadata, for example `0.1.0-dev.42+sha.a1b2c3d`.
+- `main` publishes a prerelease for runtime-affecting pushes using the current `VERSION` value plus CI metadata, for example `0.1.0-dev.42+sha.a1b2c3d`.
+- Documentation-only and workflow-only changes do not publish a prerelease.
 - Stable releases are cut manually from GitHub Actions and must match the root `VERSION` file exactly.
 - Release bundles include the runtime deployment content: `src`, `scripts`, `config`, `README.md`, `LICENSE`, `SECURITY.md`, and `CONTRIBUTING.md`.
 

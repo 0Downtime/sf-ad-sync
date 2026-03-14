@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+      - 'docs/**'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       version:
