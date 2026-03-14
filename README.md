@@ -30,24 +30,24 @@ Comparison against the Microsoft Entra SuccessFactors connector documented here:
 | Rollback of recorded AD changes | ✅ | ❌ |
 | Delta sync plus periodic full reconciliation | ✅ | ✅ |
 | Audit logs and sync run reporting | ✅ | ✅ |
-| On-demand single-user provisioning test | 🗓️ Planned | ✅ |
-| Email write-back to SuccessFactors | 🗓️ Planned | ✅ |
-| Hosted admin portal workflow for mapping, logs, and config export/import | 🗓️ Planned | ✅ |
+| Per-worker replay and on-demand provisioning test | 🗓️ Planned | ✅ |
+| Email write-back to SuccessFactors for downstream process needs | 🗓️ Planned | ✅ |
+| Hosted admin portal for mapping management, dry-run review, run history, and approvals | 🗓️ Planned | ✅ |
 
 ## Planned Features
-Planned work is ordered by delivery priority so the roadmap is easy to scan from immediate operational needs to longer-term product improvements.
+Planned work is ordered by delivery priority so the roadmap is easy to scan from immediate operational needs to longer-term product improvements. The planned items in the comparison table use the same names as the roadmap below.
 
 ### Near Term
-- Manual review queue for quarantined workers, unresolved managers, and identity conflicts.
+- Manual review workflow with operator actions for quarantined workers, unresolved managers, and rehire cases.
 - Approval mode for high-risk actions such as disables, deletes, and graveyard OU moves.
 - Alerting hooks for failed runs, guardrail breaches, and manual-review events.
-- Per-worker replay and debug mode to inspect mapping, matching, and lifecycle decisions.
+- Per-worker replay and on-demand provisioning test mode to inspect mapping, matching, and lifecycle decisions.
 
 ### Mid Term
-- Policy engine for prehire, rehire, leave-of-absence, contractor, transfer, and termination handling.
-- Identity collision workflows for duplicate email, UPN, employee ID, and ambiguous matches.
-- Conditional group provisioning based on company, department, location, or worker type.
-- Manager resolution retry and fallback strategies for delayed or missing manager records.
+- Expanded policy engine for prehire, rehire, leave-of-absence, contractor, transfer, and termination handling.
+- Operator workflows for resolving duplicate email, UPN, employee ID, and ambiguous identity matches.
+- Conditional group provisioning rules based on company, department, location, or worker type.
+- Manager resolution retry and fallback strategies beyond the current quarantine behavior.
 - SuccessFactors schema discovery to help build mapping configs from tenant metadata.
 - Attribute-level protection rules such as preserving operator-managed fields.
 
@@ -58,7 +58,7 @@ Planned work is ordered by delivery priority so the roadmap is easy to scan from
 - Drift detection for AD state, mapping behavior, and config changes across runs.
 - Plugin-based custom transforms and matching extensions without forking the project.
 - Versioned config migration support as the config schema evolves.
-- Regression fixture packs for replaying tenant-specific edge cases in tests.
+- Expanded regression fixture packs for replaying tenant-specific edge cases in tests.
 
 ## Project Layout
 - `src/Invoke-SfAdSync.ps1`: main sync entrypoint.
