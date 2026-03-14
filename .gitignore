@@ -15,5 +15,6 @@ artifacts/
 
 state/runtime/
 reports/output/
+reports/mock-output/
 reports/synthetic/
 reports/synthetic*/
