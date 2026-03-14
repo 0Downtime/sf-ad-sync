@@ -116,7 +116,7 @@ pwsh ./scripts/Start-MockSuccessFactorsApi.ps1 `
   -Port 18080
 ```
 
-2. Point the sync at [sample.mock-successfactors.real-ad.sync-config.json](/C:/Users/girsn/dev/github.com/0Downtime/sf-ad-sync/config/sample.mock-successfactors.real-ad.sync-config.json) or a copy of it.
+2. Point the sync at `./config/sample.mock-successfactors.real-ad.sync-config.json` or a copy of it.
 
 3. Run preflight:
 

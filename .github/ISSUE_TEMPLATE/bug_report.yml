@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a defect or regression
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Exact steps, config shape, and environment details needed to reproduce the issue.
+      placeholder: |
+        1. Run ...
+        2. Use config ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and diagnostics
+      description: Paste relevant redacted output from Pester, PSScriptAnalyzer, Trivy, or sync reports.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed secrets, personal data, and tenant-specific identifiers from the report.
+          required: true
