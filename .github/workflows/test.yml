@@ -33,7 +33,9 @@ jobs:
       - name: Run tests with coverage summary
         shell: pwsh
         run: |
-          ./scripts/Invoke-TestSuite.ps1 -Detailed -Coverage -CoverageSummaryPath ./artifacts/test-coverage-summary.json
+          New-Item -ItemType Directory -Force -Path ./artifacts | Out-Null
+          ./scripts/Invoke-TestSuite.ps1 -Detailed -Coverage -CoverageSummaryPath ./artifacts/test-coverage-summary.json 2>&1 |
+            Tee-Object -FilePath ./artifacts/pester-output.txt
 
       - name: Upload coverage summary
         if: always() && hashFiles('artifacts/test-coverage-summary.json') != ''
@@ -41,3 +43,10 @@ jobs:
         with:
           name: test-coverage-summary
           path: artifacts/test-coverage-summary.json
+
+      - name: Upload Pester output
+        if: always() && hashFiles('artifacts/pester-output.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-output
+          path: artifacts/pester-output.txt

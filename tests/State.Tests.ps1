@@ -1,9 +1,15 @@
 Describe 'State helpers' {
     BeforeAll {
         Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/State.psm1" -Force
+        $script:SupportsDateKind = (Get-Command ConvertFrom-Json -CommandType Cmdlet).Parameters.ContainsKey('DateKind')
     }
 
     It 'preserves timestamp strings when DateKind is supported' {
+        if (-not $script:SupportsDateKind) {
+            Set-ItResult -Skipped -Because 'ConvertFrom-Json -DateKind is not available in this PowerShell runtime.'
+            return
+        }
+
         $state = ConvertFrom-SfAdJsonDocument -Json '{"checkpoint":"2026-03-12T21:00:00","workers":{}}'
 
         $state.checkpoint | Should -BeOfType ([string])
