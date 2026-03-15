@@ -52,5 +52,5 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v6
         with:
           args: >
-            "-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}"
-            "-Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}"
+            "-Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}"
+            "-Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}"
