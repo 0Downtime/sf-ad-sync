@@ -23,37 +23,36 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
+      security-events: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
-      - name: Install PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
-
       - name: Run PSScriptAnalyzer
+        id: pssa
+        continue-on-error: true
+        uses: microsoft/psscriptanalyzer-action@v1.0
+        with:
+          path: '".\src", ".\scripts"'
+          recurse: true
+          settings: .\PSScriptAnalyzerSettings.psd1
+          severity: '"Error", "Warning"'
+          enableExit: true
+          output: results.sarif
+
+      - name: Upload PSScriptAnalyzer SARIF
+        if: always() && hashFiles('results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+
+      - name: Enforce PSScriptAnalyzer result
+        if: always() && steps.pssa.outcome == 'failure'
         shell: pwsh
         run: |
-          $paths = @('./src', './scripts')
-          $results = foreach ($path in $paths) {
-            Invoke-ScriptAnalyzer `
-              -Path $path `
-              -Recurse `
-              -Settings ./PSScriptAnalyzerSettings.psd1 `
-              -Severity Error,Warning
-          }
-
-          if ($results) {
-            $results |
-              Sort-Object Severity, ScriptPath, Line |
-              Format-Table Severity, RuleName, ScriptPath, Line, Message -AutoSize
-
-            throw "PSScriptAnalyzer reported $($results.Count) issue(s)."
-          }
+          throw 'PSScriptAnalyzer reported one or more Error/Warning findings.'
 
   gitleaks:
     name: Gitleaks Secret Scan
@@ -63,7 +62,7 @@ jobs:
       security-events: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -81,7 +80,7 @@ jobs:
       security-events: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
