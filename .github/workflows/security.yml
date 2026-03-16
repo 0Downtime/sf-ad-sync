@@ -59,12 +59,14 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results-src.sarif
+          category: /psscriptanalyzer/src
 
       - name: Upload PSScriptAnalyzer SARIF for scripts
         if: always() && hashFiles('results-scripts.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results-scripts.sarif
+          category: /psscriptanalyzer/scripts
 
       - name: Enforce PSScriptAnalyzer result
         if: always() && (steps.pssa_src.outcome == 'failure' || steps.pssa_scripts.outcome == 'failure')
