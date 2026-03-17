@@ -89,10 +89,12 @@ jobs:
 
       - name: Resolve stable release metadata
         id: release_info
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         shell: pwsh
         run: |
           $commitSha = (git rev-parse HEAD).Trim()
-          $info = & ./scripts/Get-SfAdReleaseInfo.ps1 -Channel Stable -Version '${{ inputs.version }}' -CommitSha $commitSha
+          $info = & ./scripts/Get-SfAdReleaseInfo.ps1 -Channel Stable -Version $env:RELEASE_VERSION -CommitSha $commitSha
           "version=$($info.version)" >> $env:GITHUB_OUTPUT
           "tag=$($info.tag)" >> $env:GITHUB_OUTPUT
           "commit_sha=$($info.commitSha)" >> $env:GITHUB_OUTPUT
@@ -100,6 +102,8 @@ jobs:
       - name: Verify required CI checks succeeded
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY_NAME: ${{ github.repository }}
+          RELEASE_COMMIT_SHA: ${{ steps.release_info.outputs.commit_sha }}
         shell: pwsh
         run: |
           $requiredContexts = @(
@@ -109,7 +113,7 @@ jobs:
               'Trivy Repository Scan'
           )
 
-          $status = gh api "repos/${{ github.repository }}/commits/${{ steps.release_info.outputs.commit_sha }}/status" | ConvertFrom-Json -Depth 20
+          $status = gh api "repos/$env:GITHUB_REPOSITORY_NAME/commits/$env:RELEASE_COMMIT_SHA/status" | ConvertFrom-Json -Depth 20
           $latestByContext = @{}
           foreach ($entry in $status.statuses) {
               if (-not $latestByContext.ContainsKey($entry.context)) {
