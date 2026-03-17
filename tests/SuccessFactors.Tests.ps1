@@ -155,17 +155,27 @@ Describe 'SuccessFactors module' {
                 throw 'Expected Get-SfOAuthToken to throw.'
             } catch {
                 $_.Exception.Message | Should -Match 'OAuth request failed'
+                $_.Exception.Message | Should -Match 'SuccessFactors OAuth token request failed'
+                $_.Exception.Message | Should -Match ([regex]::Escape($global:SuccessFactorsTestConfig.successFactors.oauth.tokenUrl))
                 $_.Exception.Message | Should -Not -Match [regex]::Escape($global:SuccessFactorsTestConfig.successFactors.oauth.clientSecret)
             }
         }
     }
 
-    It 'propagates OData request failures' {
+    It 'adds request context to OData request failures without leaking auth data' {
         InModuleScope SuccessFactors {
             Mock Get-SfAuthHeaders { @{ Authorization = 'Bearer token-1' } }
-            Mock Invoke-RestMethod { throw 'odata request failed' }
+            Mock Invoke-RestMethod { throw 'odata request failed for Authorization=Bearer token-1' }
 
-            { Invoke-SfODataGet -Config $global:SuccessFactorsTestConfig -RelativePath 'PerPerson' -Query @{ '$select' = 'personIdExternal' } } | Should -Throw 'odata request failed'
+            try {
+                Invoke-SfODataGet -Config $global:SuccessFactorsTestConfig -RelativePath 'PerPerson' -Query @{ '$select' = 'personIdExternal' } | Out-Null
+                throw 'Expected Invoke-SfODataGet to throw.'
+            } catch {
+                $_.Exception.Message | Should -Match 'SuccessFactors OData request failed'
+                $_.Exception.Message | Should -Match 'odata request failed'
+                $_.Exception.Message | Should -Match 'URI: https://tenant\.example\.com/odata/v2/PerPerson'
+                $_.Exception.Message | Should -Not -Match 'Bearer token-1'
+            }
         }
     }
 

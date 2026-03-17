@@ -75,7 +75,7 @@ Planned work is ordered by delivery priority so the roadmap is easy to scan from
 - `tests`: Pester tests for config and mapping behavior.
 
 ## Setup
-1. Copy `config/sample.real-successfactors.real-ad.sync-config.json` and `config/sample.successfactors-to-ad.mapping-config.json` to environment-specific files.
+1. Start from `config/local.real-successfactors.real-ad.sync-config.json` and `config/local.successfactors-to-ad.mapping-config.json` for your real environment. Those `local.*` files are ignored by git so you can store tenant-specific AD and SuccessFactors settings safely outside version control.
 2. Fill in SuccessFactors OAuth details, tenant query fields, OU routing, and licensing groups. Only fill in the AD server and bind credentials if you are running from a non-domain-joined host or need to target a specific DC.
 3. Confirm the immutable SuccessFactors identity field and the AD attribute that stores it.
 4. Install RSAT Active Directory tools and ensure the host can reach SuccessFactors.
@@ -85,8 +85,8 @@ Planned work is ordered by delivery priority so the roadmap is easy to scan from
 ## Usage
 ```powershell
 pwsh ./src/Invoke-SfAdSync.ps1 `
-  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
-  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json `
+  -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/local.successfactors-to-ad.mapping-config.json `
   -Mode Delta `
   -DryRun
 ```
@@ -95,8 +95,8 @@ If you want the script to prompt for missing runtime values such as OAuth secret
 
 ```powershell
 pwsh ./scripts/Invoke-SfAdSyncInteractive.ps1 `
-  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
-  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json `
+  -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/local.successfactors-to-ad.mapping-config.json `
   -Mode Delta `
   -DryRun
 ```
@@ -105,15 +105,15 @@ Run a preflight validation before the first sync or after config changes:
 
 ```powershell
 pwsh ./scripts/Invoke-SfAdPreflight.ps1 `
-  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
-  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json
+  -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/local.successfactors-to-ad.mapping-config.json
 ```
 
 To view the current sync status from the configured state/report files:
 
 ```powershell
 pwsh ./scripts/Get-SfAdSyncStatus.ps1 `
-  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json
+  -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json
 ```
 
 Use `-AsJson` if you want the status in machine-readable form.
@@ -123,7 +123,7 @@ To watch the current stage/progress and the last few syncs in a terminal dashboa
 
 ```powershell
 pwsh ./scripts/Watch-SfAdSyncMonitor.ps1 `
-  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json
+  -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json
 ```
 
 Press `q` to quit or `r` to refresh immediately.
@@ -168,22 +168,22 @@ pwsh ./scripts/Start-MockSuccessFactorsApi.ps1 `
   -Port 18080
 ```
 
-2. Point the sync at `./config/sample.mock-successfactors.real-ad.sync-config.json` or a copy of it.
+2. Point the sync at `./config/local.mock-successfactors.real-ad.sync-config.json`. That file is ignored by git, so you can safely adjust the real AD settings locally.
 
 3. Run preflight:
 
 ```powershell
 pwsh ./scripts/Invoke-SfAdPreflight.ps1 `
-  -ConfigPath ./config/sample.mock-successfactors.real-ad.sync-config.json `
-  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json
+  -ConfigPath ./config/local.mock-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/local.successfactors-to-ad.mapping-config.json
 ```
 
 4. Run the actual sync command against the mock API. Use `-DryRun` first, then remove it when you are ready to create lab users:
 
 ```powershell
 pwsh ./src/Invoke-SfAdSync.ps1 `
-  -ConfigPath ./config/sample.mock-successfactors.real-ad.sync-config.json `
-  -MappingConfigPath ./config/sample.successfactors-to-ad.mapping-config.json `
+  -ConfigPath ./config/local.mock-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/local.successfactors-to-ad.mapping-config.json `
   -Mode Full `
   -DryRun
 ```
@@ -198,7 +198,7 @@ To roll back a specific run from its report file:
 ```powershell
 pwsh ./scripts/Undo-SfAdSyncRun.ps1 `
   -ReportPath ./reports/output/sf-ad-sync-Delta-20260306-090018.json `
-  -ConfigPath ./config/sample.real-successfactors.real-ad.sync-config.json `
+  -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json `
   -DryRun
 ```
 
@@ -218,6 +218,7 @@ Remove `-DryRun` to apply the rollback.
 ## Notes
 - This software is provided as-is and is used at your own risk. You are responsible for validating configuration, testing changes safely, and assessing operational impact before using it in any environment. The maintainers are not responsible for data loss, directory damage, outages, or other issues caused by use or misuse of this project.
 - Secret values can be supplied through environment variables referenced by `config.secrets`; those values override plaintext config settings.
+- The tracked `config/sample.*.json` files are reference templates. Put real tenant values in the ignored `config/local.*.json` files instead.
 - On a domain-joined host, leave `ad.server`, `ad.username`, and `ad.bindPassword` empty and the script will use the machine and user domain context.
 - For non-domain-joined hosts, set `ad.server`, `ad.username`, and `ad.bindPassword` or their env-backed secret equivalents so AD cmdlets run against a specific DC with explicit credentials.
 - The sample config includes per-run safety thresholds for creates, disables, and deletions. Exceeding a threshold fails the run before the next mutation is applied.

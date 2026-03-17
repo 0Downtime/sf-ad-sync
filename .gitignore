@@ -20,3 +20,7 @@ reports/output/
 reports/mock-output/
 reports/synthetic/
 reports/synthetic*/
+
+config/*.local.sync-config.json
+config/*.local.mapping-config.json
+config/local.*.json

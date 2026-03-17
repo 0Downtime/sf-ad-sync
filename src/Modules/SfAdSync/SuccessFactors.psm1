@@ -1,5 +1,128 @@
 Set-StrictMode -Version Latest
 
+function Get-SfSanitizedText {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string]$Text,
+        [AllowNull()]
+        [string[]]$Secrets
+    )
+
+    if ($null -eq $Text) {
+        return $null
+    }
+
+    $sanitized = $Text
+    foreach ($secret in @($Secrets)) {
+        if ([string]::IsNullOrWhiteSpace($secret)) {
+            continue
+        }
+
+        $escapedSecret = [regex]::Escape($secret)
+        $sanitized = [regex]::Replace($sanitized, $escapedSecret, '[REDACTED]')
+    }
+
+    return $sanitized
+}
+
+function Get-SfExceptionDetails {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Exception]$Exception,
+        [AllowNull()]
+        [string[]]$Secrets
+    )
+
+    $details = New-Object System.Collections.Generic.List[string]
+    $details.Add("Exception type: $($Exception.GetType().FullName)")
+
+    $exceptionMessage = Get-SfSanitizedText -Text $Exception.Message -Secrets $Secrets
+    if (-not [string]::IsNullOrWhiteSpace($exceptionMessage)) {
+        $details.Add("Exception message: $exceptionMessage")
+    }
+
+    if ($Exception.InnerException) {
+        $innerType = $Exception.InnerException.GetType().FullName
+        $innerMessage = Get-SfSanitizedText -Text $Exception.InnerException.Message -Secrets $Secrets
+        $details.Add("Inner exception type: $innerType")
+        if (-not [string]::IsNullOrWhiteSpace($innerMessage)) {
+            $details.Add("Inner exception message: $innerMessage")
+        }
+    }
+
+    $response = $null
+    if ($Exception.PSObject.Properties.Name -contains 'Response') {
+        $response = $Exception.Response
+    }
+    if ($response) {
+        $statusCode = $null
+        $statusDescription = $null
+
+        if ($response.PSObject.Properties.Name -contains 'StatusCode') {
+            $statusCode = [int]$response.StatusCode
+            $statusDescription = "$($response.StatusCode)"
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($statusDescription)) {
+            $details.Add("HTTP status: $statusDescription")
+        } elseif ($null -ne $statusCode) {
+            $details.Add("HTTP status code: $statusCode")
+        }
+
+        try {
+            $responseStream = $response.GetResponseStream()
+            if ($responseStream) {
+                $reader = [System.IO.StreamReader]::new($responseStream)
+                try {
+                    $responseBody = $reader.ReadToEnd()
+                } finally {
+                    $reader.Dispose()
+                    $responseStream.Dispose()
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                    $responseBody = Get-SfSanitizedText -Text $responseBody -Secrets $Secrets
+                    if ($responseBody.Length -gt 500) {
+                        $responseBody = $responseBody.Substring(0, 500)
+                    }
+
+                    $details.Add("Response body: $responseBody")
+                }
+            }
+        } catch {
+            $details.Add("Response body read failed: $($_.Exception.Message)")
+        }
+    }
+
+    return $details
+}
+
+function New-SfRequestFailure {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Operation,
+        [Parameter(Mandatory)]
+        [string]$Uri,
+        [Parameter(Mandatory)]
+        [System.Exception]$Exception,
+        [AllowNull()]
+        [string[]]$Secrets
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("$Operation failed.")
+    $lines.Add("URI: $Uri")
+
+    foreach ($line in Get-SfExceptionDetails -Exception $Exception -Secrets $Secrets) {
+        $lines.Add($line)
+    }
+
+    return [System.Exception]::new(($lines -join [Environment]::NewLine), $Exception)
+}
+
 function Get-SfOAuthToken {
     [CmdletBinding()]
     param(
@@ -22,7 +145,19 @@ function Get-SfOAuthToken {
         $body['company_id'] = $Config.successFactors.oauth.companyId
     }
 
-    $response = Invoke-RestMethod -Uri $tokenUri -Method Post -Body $body -ContentType 'application/x-www-form-urlencoded'
+    try {
+        $response = Invoke-RestMethod -Uri $tokenUri -Method Post -Body $body -ContentType 'application/x-www-form-urlencoded'
+    } catch {
+        $secrets = @(
+            "$($Config.successFactors.oauth.clientSecret)"
+        )
+        throw (New-SfRequestFailure -Operation 'SuccessFactors OAuth token request' -Uri $tokenUri -Exception $_.Exception -Secrets $secrets)
+    }
+
+    if (-not $response.access_token) {
+        throw "SuccessFactors OAuth token request succeeded but the response did not include access_token. URI: $tokenUri"
+    }
+
     return $response.access_token
 }
 
@@ -63,8 +198,18 @@ function Invoke-SfODataGet {
         $uriBuilder.Query = ($pairs -join '&')
     }
 
+    $requestUri = $uriBuilder.Uri.AbsoluteUri
     $headers = Get-SfAuthHeaders -Config $Config
-    return Invoke-RestMethod -Uri $uriBuilder.Uri.AbsoluteUri -Headers $headers -Method Get
+
+    try {
+        return Invoke-RestMethod -Uri $requestUri -Headers $headers -Method Get
+    } catch {
+        $secrets = @(
+            "$($Config.successFactors.oauth.clientSecret)",
+            "$($headers.Authorization)"
+        )
+        throw (New-SfRequestFailure -Operation 'SuccessFactors OData request' -Uri $requestUri -Exception $_.Exception -Secrets $secrets)
+    }
 }
 
 function Get-SfWorkers {
