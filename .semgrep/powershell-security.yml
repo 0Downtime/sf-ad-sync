@@ -3,22 +3,27 @@ rules:
     message: Avoid Invoke-Expression and iex. They execute dynamically constructed PowerShell and are a common code-execution vector.
     severity: ERROR
     languages:
-      - powershell
+      - generic
+    paths:
+      include:
+        - "*.ps1"
+        - "*.psm1"
     metadata:
       category: security
       technology:
         - powershell
       confidence: high
-    patterns:
-      - pattern-either:
-          - pattern: Invoke-Expression $EXPR
-          - pattern: iex $EXPR
+    pattern-regex: (?i)\b(?:Invoke-Expression|iex)\b
 
   - id: powershell-no-encoded-command
     message: Avoid -EncodedCommand. Encoded PowerShell command execution obscures behavior and is frequently abused.
     severity: ERROR
     languages:
-      - powershell
+      - generic
+    paths:
+      include:
+        - "*.ps1"
+        - "*.psm1"
     metadata:
       category: security
       technology:
@@ -30,7 +35,11 @@ rules:
     message: Avoid WebClient DownloadString and DownloadData patterns. Prefer explicit, validated HTTP calls without dynamic execution.
     severity: ERROR
     languages:
-      - powershell
+      - generic
+    paths:
+      include:
+        - "*.ps1"
+        - "*.psm1"
     metadata:
       category: security
       technology:
@@ -42,7 +51,11 @@ rules:
     message: Avoid piping downloaded content into Invoke-Expression or iex.
     severity: ERROR
     languages:
-      - powershell
+      - generic
+    paths:
+      include:
+        - "*.ps1"
+        - "*.psm1"
     metadata:
       category: security
       technology:
