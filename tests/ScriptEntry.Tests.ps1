@@ -287,9 +287,9 @@ param(
             $result.env.clientId | Should -Be 'env-client-id'
             $result.env.clientSecret | Should -Be 'env-client-secret'
             $result.env.defaultPassword | Should -Be 'env-default-password'
-            $result.env.adServer | Should -Be ''
-            $result.env.adUsername | Should -Be ''
-            $result.env.adBindPassword | Should -Be ''
+            $result.env.adServer | Should -BeNullOrEmpty
+            $result.env.adUsername | Should -BeNullOrEmpty
+            $result.env.adBindPassword | Should -BeNullOrEmpty
             Assert-MockCalled Read-Host -Times 0 -Exactly
         } finally {
             Remove-Item Function:\Get-CimInstance -ErrorAction SilentlyContinue
