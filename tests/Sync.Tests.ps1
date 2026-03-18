@@ -1052,6 +1052,191 @@ Describe 'Invoke-SfAdSyncRun' {
             Assert-MockCalled Remove-SfAdUser -Times 0 -Exactly
         }
     }
+
+    It 'records a first-sync review artifact without mutating AD or sync state' {
+        InModuleScope Sync {
+            $global:SyncTestBaseConfig.reporting | Add-Member -MemberType NoteProperty -Name reviewOutputDirectory -Value (Join-Path $TestDrive 'reviews') -Force
+            Mock Get-SfAdSyncConfig { $global:SyncTestBaseConfig }
+            Mock Get-SfAdSyncMappingConfig {
+                [pscustomobject]@{
+                    mappings = @(
+                        [pscustomobject]@{
+                            source = 'firstName'
+                            target = 'GivenName'
+                            enabled = $true
+                            required = $true
+                            transform = 'Trim'
+                        }
+                    )
+                }
+            }
+            Mock Get-SfAdSyncState { [pscustomobject]@{ checkpoint = '2026-03-05T10:00:00'; workers = [pscustomobject]@{} } }
+            Mock Get-SfWorkers {
+                @(
+                    [pscustomobject]@{
+                        personIdExternal = '5001'
+                        firstName = 'Jamie'
+                        status = 'active'
+                        startDate = (Get-Date).ToString('o')
+                        managerEmployeeId = $null
+                    }
+                )
+            }
+            Mock Get-SfAdTargetUser {
+                [pscustomobject]@{
+                    ObjectGuid = [guid]'55555555-5555-5555-5555-555555555555'
+                    DistinguishedName = 'CN=Jamie Doe,OU=Employees,DC=example,DC=com'
+                    SamAccountName = 'jdoe'
+                    employeeID = '5001'
+                    Enabled = $true
+                    GivenName = 'OldJamie'
+                }
+            }
+            Mock Get-SfAdWorkerState { $null }
+            Mock Get-SfAdAttributeChanges {
+                [pscustomobject]@{
+                    Changes = @{ GivenName = 'Jamie' }
+                    MissingRequired = @()
+                }
+            }
+            Mock Get-SfAdMappingEvaluation {
+                [pscustomobject]@{
+                    Changes = @{ GivenName = 'Jamie' }
+                    MissingRequired = @()
+                    Rows = @(
+                        [pscustomobject]@{
+                            sourceField = 'firstName'
+                            targetAttribute = 'GivenName'
+                            transform = 'Trim'
+                            required = $true
+                            sourceValue = 'Jamie'
+                            currentAdValue = 'OldJamie'
+                            proposedValue = 'Jamie'
+                            changed = $true
+                        }
+                    )
+                }
+            }
+            Mock Set-SfAdUserAttributes {}
+            Mock Save-SfAdSyncState { throw 'state should not be saved in review mode' }
+            Mock Set-SfAdWorkerState { throw 'tracked state should not be written in review mode' }
+            Mock Save-SfAdSyncReport {
+                param($Report, $Directory, $Mode)
+                $global:CapturedReport = $Report
+                $global:CapturedReviewDirectory = $Directory
+                return (Join-Path $Directory "sf-ad-sync-$Mode.json")
+            }
+            Mock Ensure-ActiveDirectoryModule {}
+
+            Invoke-SfAdSyncRun -ConfigPath $global:SyncTestConfigPath -MappingConfigPath $global:SyncTestMappingConfigPath -Mode Review | Out-Null
+
+            $global:CapturedReviewDirectory | Should -Be $global:SyncTestBaseConfig.reporting.reviewOutputDirectory
+            $global:CapturedReport.mode | Should -Be 'Review'
+            $global:CapturedReport.artifactType | Should -Be 'FirstSyncReview'
+            $global:CapturedReport.dryRun | Should -BeTrue
+            $global:CapturedReport.reviewSummary.existingUsersMatched | Should -Be 1
+            $global:CapturedReport.reviewSummary.existingUsersWithAttributeChanges | Should -Be 1
+            $global:CapturedReport.reviewSummary.deletionPassSkipped | Should -BeTrue
+            $global:CapturedReport.updates[0].reviewCategory | Should -Be 'ExistingUserChanges'
+            $global:CapturedReport.updates[0].changedAttributeDetails[0].targetAttribute | Should -Be 'GivenName'
+            Assert-MockCalled Set-SfAdUserAttributes -Times 1 -Exactly -ParameterFilter { $DryRun }
+            Assert-MockCalled Save-SfAdSyncState -Times 0 -Exactly
+            Assert-MockCalled Set-SfAdWorkerState -Times 0 -Exactly
+            Assert-MockCalled Get-SfWorkers -Times 1 -Exactly
+        }
+    }
+
+    It 'counts matched review users that land in quarantine or manual review' {
+        InModuleScope Sync {
+            $global:SyncTestBaseConfig.reporting | Add-Member -MemberType NoteProperty -Name reviewOutputDirectory -Value (Join-Path $TestDrive 'reviews') -Force
+            Mock Get-SfAdSyncConfig { $global:SyncTestBaseConfig }
+            Mock Get-SfAdSyncMappingConfig {
+                [pscustomobject]@{
+                    mappings = @(
+                        [pscustomobject]@{
+                            source = 'firstName'
+                            target = 'GivenName'
+                            enabled = $true
+                            required = $true
+                            transform = 'Trim'
+                        }
+                    )
+                }
+            }
+            Mock Get-SfAdSyncState {
+                [pscustomobject]@{
+                    checkpoint = '2026-03-05T10:00:00'
+                    workers = [pscustomobject]@{
+                        '6002' = [pscustomobject]@{
+                            suppressed = $true
+                            distinguishedName = 'CN=Rehire,OU=Employees,DC=example,DC=com'
+                        }
+                    }
+                }
+            }
+            Mock Get-SfWorkers {
+                @(
+                    [pscustomobject]@{
+                        personIdExternal = '6001'
+                        firstName = $null
+                        status = 'active'
+                        startDate = (Get-Date).ToString('o')
+                        managerEmployeeId = $null
+                    }
+                    [pscustomobject]@{
+                        personIdExternal = '6002'
+                        firstName = 'Rehire'
+                        status = 'active'
+                        startDate = (Get-Date).ToString('o')
+                        managerEmployeeId = $null
+                    }
+                )
+            }
+            Mock Get-SfAdTargetUser {
+                [pscustomobject]@{
+                    ObjectGuid = [guid]'66666666-6666-6666-6666-666666666666'
+                    DistinguishedName = 'CN=Existing User,OU=Employees,DC=example,DC=com'
+                    SamAccountName = 'existing.user'
+                    employeeID = '6001'
+                    Enabled = $true
+                    GivenName = 'Existing'
+                }
+            } -ParameterFilter { $WorkerId -eq '6001' }
+            Mock Get-SfAdTargetUser { $null } -ParameterFilter { $WorkerId -eq '6002' }
+            Mock Get-SfAdWorkerState { $null } -ParameterFilter { $WorkerId -eq '6001' }
+            Mock Get-SfAdWorkerState {
+                [pscustomobject]@{
+                    suppressed = $true
+                    distinguishedName = 'CN=Rehire,OU=Employees,DC=example,DC=com'
+                }
+            } -ParameterFilter { $WorkerId -eq '6002' }
+            Mock Get-SfAdAttributeChanges {
+                [pscustomobject]@{
+                    Changes = @{}
+                    MissingRequired = @('firstName')
+                }
+            }
+            Mock Get-SfAdMappingEvaluation {
+                [pscustomobject]@{
+                    Changes = @{}
+                    MissingRequired = @('firstName')
+                    Rows = @()
+                }
+            }
+            Mock Save-SfAdSyncReport {
+                param($Report, $Directory, $Mode)
+                $global:CapturedReport = $Report
+                return (Join-Path $Directory "sf-ad-sync-$Mode.json")
+            }
+            Mock Ensure-ActiveDirectoryModule {}
+
+            Invoke-SfAdSyncRun -ConfigPath $global:SyncTestConfigPath -MappingConfigPath $global:SyncTestMappingConfigPath -Mode Review | Out-Null
+
+            $global:CapturedReport.reviewSummary.existingUsersMatched | Should -Be 2
+            $global:CapturedReport.quarantined[0].matchedExistingUser | Should -BeTrue
+            $global:CapturedReport.manualReview[0].matchedExistingUser | Should -BeTrue
+        }
+    }
 }
 
 Describe 'Test-SfAdSyncPreflight' {

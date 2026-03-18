@@ -173,7 +173,7 @@ function Invoke-SfAdMonitorShortcut {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Preflight','DryRun','OpenReport','CopyReportPath')]
+        [ValidateSet('Preflight','DryRun','ReviewRun','OpenReport','CopyReportPath')]
         [string]$Action,
         [Parameter(Mandatory)]
         [pscustomobject]$Status,
@@ -229,6 +229,33 @@ function Invoke-SfAdMonitorShortcut {
                 $UiState.commandOutput = @("Config=$($context.configPath)", "Mapping=$($context.mappingConfigPath)")
             } catch {
                 $UiState.statusMessage = 'Failed to start dry-run sync.'
+                $UiState.commandOutput = @($_.Exception.Message)
+            }
+        }
+        'ReviewRun' {
+            if (-not $context.mappingConfigPath) {
+                $UiState.statusMessage = 'Review unavailable: no mapping config path was provided and none could be inferred from recent runs.'
+                $UiState.commandOutput = @()
+                return
+            }
+
+            $argumentList = @(
+                '-NoLogo'
+                '-NoProfile'
+                '-File'
+                (Join-Path $projectRoot 'scripts/Invoke-SfAdFirstSyncReview.ps1')
+                '-ConfigPath'
+                $context.configPath
+                '-MappingConfigPath'
+                $context.mappingConfigPath
+            )
+
+            try {
+                Start-Process -FilePath 'pwsh' -ArgumentList $argumentList | Out-Null
+                $UiState.statusMessage = 'Started first-sync review in a new PowerShell process.'
+                $UiState.commandOutput = @("Config=$($context.configPath)", "Mapping=$($context.mappingConfigPath)")
+            } catch {
+                $UiState.statusMessage = 'Failed to start first-sync review.'
                 $UiState.commandOutput = @($_.Exception.Message)
             }
         }
@@ -398,7 +425,8 @@ do {
                             break
                         }
                         ']' {
-                            $maxBucketIndex = [math]::Max(@(Get-SfAdMonitorBucketDefinitions).Count - 1, 0)
+                            $bucketMode = if ($lastStatus) { (Get-SfAdMonitorSelectedRun -Status $lastStatus -UiState $uiState).mode } else { $null }
+                            $maxBucketIndex = [math]::Max(@(Get-SfAdMonitorBucketDefinitions -Mode $bucketMode).Count - 1, 0)
                             $uiState.selectedBucketIndex = [math]::Min([int]$uiState.selectedBucketIndex + 1, $maxBucketIndex)
                             $uiState.selectedItemIndex = 0
                             $uiState.focus = 'Detail'
@@ -423,6 +451,13 @@ do {
                         'o' {
                             if ($lastStatus) {
                                 Invoke-SfAdMonitorShortcut -Action OpenReport -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
+                            }
+                            $refreshRequested = $true
+                            break
+                        }
+                        'v' {
+                            if ($lastStatus) {
+                                Invoke-SfAdMonitorShortcut -Action ReviewRun -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
                             }
                             $refreshRequested = $true
                             break

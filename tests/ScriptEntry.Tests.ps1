@@ -129,6 +129,55 @@ Describe 'Script entrypoints' {
         }
     }
 
+    It 'runs the first-sync review entry script and returns the review summary in json mode' {
+        $configPath = Join-Path $TestDrive 'review-config.json'
+        $mappingPath = Join-Path $TestDrive 'review-mapping.json'
+        $invokeStubPath = Join-Path $TestDrive 'invoke-review-stub.ps1'
+        $reportPath = Join-Path $TestDrive 'sf-ad-sync-Review.json'
+
+        (New-StatusConfigContent -StatePath (Join-Path $TestDrive 'state.json') -ReportDirectory (Join-Path $TestDrive 'reports')) | Set-Content -Path $configPath
+        '{}' | Set-Content -Path $mappingPath
+        @"
+{
+  "runId": "review-123",
+  "mode": "Review",
+  "status": "Succeeded",
+  "reviewSummary": {
+    "existingUsersMatched": 2,
+    "existingUsersWithAttributeChanges": 1,
+    "proposedCreates": 1,
+    "proposedOffboarding": 0,
+    "quarantined": 0,
+    "conflicts": 0
+  }
+}
+"@ | Set-Content -Path $reportPath
+        @"
+param(
+    [string]`$ConfigPath,
+    [string]`$MappingConfigPath,
+    [string]`$Mode
+)
+
+'$reportPath'
+"@ | Set-Content -Path $invokeStubPath
+
+        Mock Join-Path {
+            if ($ChildPath -eq 'src/Invoke-SfAdSync.ps1') {
+                return $invokeStubPath
+            }
+
+            return [System.IO.Path]::Combine($Path, $ChildPath)
+        }
+
+        $result = & "$PSScriptRoot/../scripts/Invoke-SfAdFirstSyncReview.ps1" -ConfigPath $configPath -MappingConfigPath $mappingPath -AsJson | ConvertFrom-Json -Depth 10
+
+        $result.mode | Should -Be 'Review'
+        $result.status | Should -Be 'Succeeded'
+        $result.reviewSummary.existingUsersMatched | Should -Be 2
+        $result.reviewSummary.proposedCreates | Should -Be 1
+    }
+
     It 'returns preflight details from the preflight script in json mode' {
         Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/Sync.psm1" -Force -DisableNameChecking
         Mock Test-SfAdSyncPreflight {

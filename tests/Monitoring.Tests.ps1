@@ -66,6 +66,15 @@ Describe 'Monitoring module' {
         $bucketNames | Should -Contain 'unchanged'
     }
 
+    It 'uses review-first bucket ordering for review artifacts' {
+        $bucketNames = @(Get-SfAdMonitorBucketDefinitions -Mode Review | ForEach-Object { $_.Name })
+
+        $bucketNames[0] | Should -Be 'updates'
+        $bucketNames[1] | Should -Be 'unchanged'
+        $bucketNames[2] | Should -Be 'creates'
+        $bucketNames | Should -Not -Contain 'deletions'
+    }
+
     It 'filters selected bucket items by text across object fields' {
         $bucketSelection = [pscustomobject]@{
             Bucket = [pscustomobject]@{
@@ -358,5 +367,343 @@ Describe 'Monitoring module' {
         ($lines -join "`n") | Should -Match 'Worker State'
         ($lines -join "`n") | Should -Match 'Operation: no matching reversible operation'
         ($lines -join "`n") | Should -Match 'workerId=1002'
+    }
+
+    It 'formats review artifacts with review summary and mapped field details' {
+        $reportPath = Join-Path $TestDrive 'sf-ad-sync-Review-20260312-220000.json'
+        @{
+            runId = 'review-123'
+            artifactType = 'FirstSyncReview'
+            configPath = 'config.json'
+            mappingConfigPath = 'mapping.json'
+            mode = 'Review'
+            dryRun = $true
+            startedAt = '2026-03-12T21:30:00'
+            completedAt = '2026-03-12T21:35:00'
+            status = 'Succeeded'
+            reviewSummary = @{
+                existingUsersMatched = 2
+                existingUsersWithAttributeChanges = 1
+                existingUsersWithoutAttributeChanges = 1
+                proposedCreates = 1
+                proposedOffboarding = 0
+                mappingCount = 3
+                deletionPassSkipped = $true
+            }
+            operations = @()
+            updates = @(
+                @{
+                    workerId = '1001'
+                    samAccountName = 'jdoe'
+                    reviewCategory = 'ExistingUserChanges'
+                    changedAttributeDetails = @(
+                        @{
+                            sourceField = 'department'
+                            targetAttribute = 'department'
+                            transform = 'Trim'
+                            currentAdValue = 'Finance'
+                            proposedValue = 'Sales'
+                        }
+                    )
+                }
+            )
+            unchanged = @()
+            creates = @()
+            enables = @()
+            disables = @()
+            graveyardMoves = @()
+            deletions = @()
+            quarantined = @()
+            conflicts = @()
+            guardrailFailures = @()
+            manualReview = @()
+        } | ConvertTo-Json -Depth 20 | Set-Content -Path $reportPath
+
+        $status = [pscustomobject]@{
+            paths = [pscustomobject]@{
+                configPath = 'config.json'
+                statePath = 'state.json'
+                reportDirectory = 'reports'
+                reviewReportDirectory = 'reviews'
+            }
+            currentRun = [pscustomobject]@{
+                status = 'Idle'
+                stage = 'Completed'
+                mode = $null
+                dryRun = $false
+                startedAt = $null
+                lastUpdatedAt = '2026-03-12T21:41:00'
+                processedWorkers = 0
+                totalWorkers = 0
+                currentWorkerId = $null
+                lastAction = 'No active sync run.'
+                errorMessage = $null
+                creates = 0
+                updates = 0
+                enables = 0
+                disables = 0
+                graveyardMoves = 0
+                deletions = 0
+                quarantined = 0
+                conflicts = 0
+                guardrailFailures = 0
+                manualReview = 0
+                unchanged = 0
+            }
+            latestRun = [pscustomobject]@{
+                status = 'Succeeded'
+                mode = 'Review'
+                artifactType = 'FirstSyncReview'
+                dryRun = $true
+                startedAt = '2026-03-12T21:30:00'
+                durationSeconds = 300
+                reversibleOperations = 0
+                creates = 0
+                updates = 1
+                enables = 0
+                disables = 0
+                graveyardMoves = 0
+                deletions = 0
+                quarantined = 0
+                conflicts = 0
+                guardrailFailures = 0
+                manualReview = 0
+                unchanged = 0
+                reviewSummary = [pscustomobject]@{
+                    existingUsersMatched = 2
+                    existingUsersWithAttributeChanges = 1
+                    existingUsersWithoutAttributeChanges = 1
+                    proposedCreates = 1
+                    proposedOffboarding = 0
+                    mappingCount = 3
+                    deletionPassSkipped = $true
+                }
+            }
+            summary = [pscustomobject]@{
+                lastCheckpoint = '2026-03-12T21:00:00'
+                totalTrackedWorkers = 10
+                suppressedWorkers = 1
+                pendingDeletionWorkers = 0
+            }
+            trackedWorkers = @()
+            context = [pscustomobject]@{
+                identityField = 'personIdExternal'
+                identityAttribute = 'employeeID'
+                defaultActiveOu = 'OU=Employees,DC=example,DC=com'
+                graveyardOu = 'OU=Graveyard,DC=example,DC=com'
+                enableBeforeStartDays = 7
+                deletionRetentionDays = 90
+                maxCreatesPerRun = 5
+                maxDisablesPerRun = 5
+                maxDeletionsPerRun = 5
+            }
+            recentRuns = @(
+                [pscustomobject]@{
+                    runId = 'review-123'
+                    path = $reportPath
+                    configPath = 'config.json'
+                    mappingConfigPath = 'mapping.json'
+                    status = 'Succeeded'
+                    mode = 'Review'
+                    artifactType = 'FirstSyncReview'
+                    dryRun = $true
+                    startedAt = '2026-03-12T21:30:00'
+                    durationSeconds = 300
+                    creates = 0
+                    updates = 1
+                    disables = 0
+                    deletions = 0
+                    conflicts = 0
+                    guardrailFailures = 0
+                    reviewSummary = [pscustomobject]@{
+                        existingUsersMatched = 2
+                        existingUsersWithAttributeChanges = 1
+                        existingUsersWithoutAttributeChanges = 1
+                        proposedCreates = 1
+                        proposedOffboarding = 0
+                        mappingCount = 3
+                        deletionPassSkipped = $true
+                    }
+                }
+            )
+        }
+        $uiState = New-SfAdMonitorUiState
+
+        $lines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
+
+        ($lines -join "`n") | Should -Match 'First Sync Review Summary'
+        ($lines -join "`n") | Should -Match 'Review: existing=2 changed=1 aligned=1 creates=1 offboarding=0'
+        ($lines -join "`n") | Should -Match 'Map: department -> department \[Trim\]'
+        ($lines -join "`n") | Should -Match 'Finance -> Sales'
+    }
+
+    It 'uses the selected run rather than latest run in the summary panel' {
+        $selectedReportPath = Join-Path $TestDrive 'sf-ad-sync-Review-20260312-220000.json'
+        @{
+            runId = 'review-older'
+            artifactType = 'FirstSyncReview'
+            configPath = 'config.json'
+            mappingConfigPath = 'mapping.json'
+            mode = 'Review'
+            dryRun = $true
+            startedAt = '2026-03-12T21:30:00'
+            completedAt = '2026-03-12T21:35:00'
+            status = 'Succeeded'
+            reviewSummary = @{
+                existingUsersMatched = 3
+                existingUsersWithAttributeChanges = 2
+                existingUsersWithoutAttributeChanges = 1
+                proposedCreates = 0
+                proposedOffboarding = 0
+                mappingCount = 3
+                deletionPassSkipped = $true
+            }
+            operations = @()
+            updates = @(@{ workerId = '1001'; samAccountName = 'jdoe' })
+            creates = @()
+            enables = @()
+            disables = @()
+            graveyardMoves = @()
+            deletions = @()
+            quarantined = @()
+            conflicts = @()
+            guardrailFailures = @()
+            manualReview = @()
+            unchanged = @()
+        } | ConvertTo-Json -Depth 20 | Set-Content -Path $selectedReportPath
+
+        $status = [pscustomobject]@{
+            paths = [pscustomobject]@{
+                configPath = 'config.json'
+                statePath = 'state.json'
+                reportDirectory = 'reports'
+                reviewReportDirectory = 'reviews'
+            }
+            currentRun = [pscustomobject]@{
+                status = 'Idle'
+                stage = 'Completed'
+                mode = $null
+                dryRun = $false
+                startedAt = $null
+                lastUpdatedAt = '2026-03-12T21:41:00'
+                processedWorkers = 0
+                totalWorkers = 0
+                currentWorkerId = $null
+                lastAction = 'No active sync run.'
+                errorMessage = $null
+                creates = 0
+                updates = 0
+                enables = 0
+                disables = 0
+                graveyardMoves = 0
+                deletions = 0
+                quarantined = 0
+                conflicts = 0
+                guardrailFailures = 0
+                manualReview = 0
+                unchanged = 0
+            }
+            latestRun = [pscustomobject]@{
+                status = 'Succeeded'
+                mode = 'Delta'
+                artifactType = 'SyncReport'
+                dryRun = $true
+                startedAt = '2026-03-13T09:00:00'
+                durationSeconds = 60
+                reversibleOperations = 0
+                creates = 9
+                updates = 8
+                enables = 0
+                disables = 0
+                graveyardMoves = 0
+                deletions = 0
+                quarantined = 7
+                conflicts = 6
+                guardrailFailures = 5
+                manualReview = 0
+                unchanged = 4
+            }
+            summary = [pscustomobject]@{
+                lastCheckpoint = '2026-03-12T21:00:00'
+                totalTrackedWorkers = 10
+                suppressedWorkers = 1
+                pendingDeletionWorkers = 0
+            }
+            trackedWorkers = @()
+            context = [pscustomobject]@{
+                identityField = 'personIdExternal'
+                identityAttribute = 'employeeID'
+                defaultActiveOu = 'OU=Employees,DC=example,DC=com'
+                graveyardOu = 'OU=Graveyard,DC=example,DC=com'
+                enableBeforeStartDays = 7
+                deletionRetentionDays = 90
+                maxCreatesPerRun = 5
+                maxDisablesPerRun = 5
+                maxDeletionsPerRun = 5
+            }
+            recentRuns = @(
+                [pscustomobject]@{
+                    runId = 'latest-delta'
+                    path = 'latest.json'
+                    status = 'Succeeded'
+                    mode = 'Delta'
+                    artifactType = 'SyncReport'
+                    dryRun = $true
+                    startedAt = '2026-03-13T09:00:00'
+                    durationSeconds = 60
+                    creates = 9
+                    updates = 8
+                    enables = 0
+                    disables = 0
+                    graveyardMoves = 0
+                    deletions = 0
+                    quarantined = 7
+                    conflicts = 6
+                    guardrailFailures = 5
+                    manualReview = 0
+                    unchanged = 4
+                }
+                [pscustomobject]@{
+                    runId = 'review-older'
+                    path = $selectedReportPath
+                    status = 'Succeeded'
+                    mode = 'Review'
+                    artifactType = 'FirstSyncReview'
+                    dryRun = $true
+                    startedAt = '2026-03-12T21:30:00'
+                    durationSeconds = 300
+                    reversibleOperations = 0
+                    creates = 0
+                    updates = 1
+                    enables = 0
+                    disables = 0
+                    graveyardMoves = 0
+                    deletions = 0
+                    quarantined = 0
+                    conflicts = 0
+                    guardrailFailures = 0
+                    manualReview = 0
+                    unchanged = 0
+                    reviewSummary = [pscustomobject]@{
+                        existingUsersMatched = 3
+                        existingUsersWithAttributeChanges = 2
+                        existingUsersWithoutAttributeChanges = 1
+                        proposedCreates = 0
+                        proposedOffboarding = 0
+                        mappingCount = 3
+                        deletionPassSkipped = $true
+                    }
+                }
+            )
+        }
+        $uiState = New-SfAdMonitorUiState
+        $uiState.selectedRunIndex = 1
+
+        $lines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
+
+        ($lines -join "`n") | Should -Match 'First Sync Review Summary'
+        ($lines -join "`n") | Should -Match 'Status: Succeeded    Mode: Review'
+        ($lines -join "`n") | Should -Match 'Totals: C=0 U=1 E=0 D=0'
+        ($lines -join "`n") | Should -Not -Match 'Totals: C=9 U=8 E=0 D=0'
     }
 }

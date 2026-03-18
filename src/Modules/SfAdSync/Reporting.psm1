@@ -7,7 +7,8 @@ function New-SfAdSyncReport {
         [switch]$DryRun,
         [string]$ConfigPath,
         [string]$MappingConfigPath,
-        [string]$StatePath
+        [string]$StatePath,
+        [string]$ArtifactType = 'SyncReport'
     )
 
     return [ordered]@{
@@ -15,6 +16,7 @@ function New-SfAdSyncReport {
         startedAt = (Get-Date).ToString('o')
         status = 'InProgress'
         mode = $Mode
+        artifactType = $ArtifactType
         dryRun = [bool]$DryRun
         configPath = $ConfigPath
         mappingConfigPath = $MappingConfigPath
@@ -22,6 +24,7 @@ function New-SfAdSyncReport {
         completedAt = $null
         failedAt = $null
         errorMessage = $null
+        reviewSummary = $null
         operations = @()
         operationSequence = 0
         creates = @()

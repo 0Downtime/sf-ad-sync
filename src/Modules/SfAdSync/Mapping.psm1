@@ -98,8 +98,27 @@ function Get-SfAdAttributeChanges {
         [pscustomobject]$MappingConfig
     )
 
+    $evaluation = Get-SfAdMappingEvaluation -Worker $Worker -ExistingUser $ExistingUser -MappingConfig $MappingConfig
+    return [pscustomobject]@{
+        Changes = $evaluation.Changes
+        MissingRequired = $evaluation.MissingRequired
+    }
+}
+
+function Get-SfAdMappingEvaluation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Worker,
+        [AllowNull()]
+        [object]$ExistingUser,
+        [Parameter(Mandatory)]
+        [pscustomobject]$MappingConfig
+    )
+
     $changes = @{}
     $missingRequired = @()
+    $rows = @()
 
     foreach ($mapping in $MappingConfig.mappings) {
         if (-not $mapping.enabled) {
@@ -113,12 +132,24 @@ function Get-SfAdAttributeChanges {
         }
 
         $mappedValue = Convert-SfAdMappedValue -Value $sourceValue -Transform $mapping.transform
+        $changed = "$mappedValue" -ne "$targetValue"
+        $rows += [pscustomobject]@{
+            sourceField = $mapping.source
+            targetAttribute = $mapping.target
+            transform = $mapping.transform
+            required = [bool]$mapping.required
+            sourceValue = $sourceValue
+            currentAdValue = $targetValue
+            proposedValue = $mappedValue
+            changed = $changed
+        }
+
         if ($mapping.required -and [string]::IsNullOrWhiteSpace("$mappedValue")) {
             $missingRequired += $mapping.source
             continue
         }
 
-        if ("$mappedValue" -ne "$targetValue") {
+        if ($changed) {
             $changes[$mapping.target] = $mappedValue
         }
     }
@@ -126,7 +157,8 @@ function Get-SfAdAttributeChanges {
     return [pscustomobject]@{
         Changes = $changes
         MissingRequired = $missingRequired
+        Rows = @($rows)
     }
 }
 
-Export-ModuleMember -Function Get-PathSegments, Get-NestedValue, Convert-SfAdMappedValue, Get-SfAdAttributeChanges
+Export-ModuleMember -Function Get-PathSegments, Get-NestedValue, Convert-SfAdMappedValue, Get-SfAdAttributeChanges, Get-SfAdMappingEvaluation

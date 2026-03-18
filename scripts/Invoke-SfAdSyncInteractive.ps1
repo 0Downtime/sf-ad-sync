@@ -4,7 +4,7 @@ param(
     [string]$ConfigPath,
     [Parameter(Mandatory)]
     [string]$MappingConfigPath,
-    [ValidateSet('Delta','Full')]
+    [ValidateSet('Delta','Full','Review')]
     [string]$Mode = 'Delta',
     [switch]$DryRun
 )

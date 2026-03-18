@@ -221,6 +221,10 @@ function Test-SfAdSyncConfig {
 
     Assert-SfAdRequiredString -Value $Config.state.path -PropertyPath 'state.path'
     Assert-SfAdRequiredString -Value $Config.reporting.outputDirectory -PropertyPath 'reporting.outputDirectory'
+    if (-not (Test-SfAdHasProperty -InputObject $Config.reporting -PropertyName 'reviewOutputDirectory') -or [string]::IsNullOrWhiteSpace("$($Config.reporting.reviewOutputDirectory)")) {
+        $reviewDirectory = Join-Path -Path $Config.reporting.outputDirectory -ChildPath 'review'
+        Set-SfAdPropertyValue -InputObject $Config.reporting -PropertyName 'reviewOutputDirectory' -Value $reviewDirectory
+    }
 
     if ([int]$Config.sync.enableBeforeStartDays -lt 0) {
         throw 'Sync config must define sync.enableBeforeStartDays as a non-negative integer.'
