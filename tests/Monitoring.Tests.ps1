@@ -54,6 +54,38 @@ Describe 'Monitoring module' {
         $resolved | Should -Be (Resolve-Path -Path $mappingPath).Path
     }
 
+    It 'includes all operation buckets in the dashboard browser' {
+        $bucketNames = @(Get-SfAdMonitorBucketDefinitions | ForEach-Object { $_.Name })
+
+        $bucketNames | Should -Contain 'creates'
+        $bucketNames | Should -Contain 'updates'
+        $bucketNames | Should -Contain 'enables'
+        $bucketNames | Should -Contain 'disables'
+        $bucketNames | Should -Contain 'graveyardMoves'
+        $bucketNames | Should -Contain 'deletions'
+        $bucketNames | Should -Contain 'unchanged'
+    }
+
+    It 'filters selected bucket items by text across object fields' {
+        $bucketSelection = [pscustomobject]@{
+            Bucket = [pscustomobject]@{
+                Name = 'creates'
+                Label = 'Creates'
+            }
+            Items = @(
+                [pscustomobject]@{ workerId = '1001'; samAccountName = 'jdoe'; department = 'Sales' }
+                [pscustomobject]@{ workerId = '1002'; samAccountName = 'asmith'; department = 'Finance' }
+            )
+        }
+        $uiState = New-SfAdMonitorUiState
+        $uiState.filterText = 'finance'
+
+        $items = @(Get-SfAdMonitorFilteredBucketItems -BucketSelection $bucketSelection -UiState $uiState)
+
+        $items.Count | Should -Be 1
+        $items[0].workerId | Should -Be '1002'
+    }
+
     It 'formats dashboard view with selected run and selected bucket details' {
         $reportPath = Join-Path $TestDrive 'sf-ad-sync-Delta-20260312-220000.json'
         @{
@@ -69,7 +101,7 @@ Describe 'Monitoring module' {
             creates = @(@{ workerId = '1001'; samAccountName = 'jdoe' })
             updates = @()
             enables = @()
-            disables = @()
+            disables = @(@{ workerId = '1004'; samAccountName = 'legacy.user'; targetState = 'Disabled' })
             graveyardMoves = @()
             deletions = @()
             quarantined = @(@{ workerId = '1002'; reason = 'ManagerNotResolved' })
@@ -152,11 +184,13 @@ Describe 'Monitoring module' {
             )
         }
         $uiState = New-SfAdMonitorUiState
+        $uiState.filterText = 'manager'
 
         $lines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
 
         ($lines -join "`n") | Should -Match 'SuccessFactors AD Sync Dashboard'
         ($lines -join "`n") | Should -Match 'Detail: Quarantined'
+        ($lines -join "`n") | Should -Match 'Filter: manager'
         ($lines -join "`n") | Should -Match 'workerId=1002'
     }
 }

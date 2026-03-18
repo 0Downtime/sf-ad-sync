@@ -133,6 +133,18 @@ function Write-SfAdStyledMonitorFrame {
     }
 }
 
+function Read-SfAdMonitorFilterText {
+    [CmdletBinding()]
+    param(
+        [string]$CurrentFilter
+    )
+
+    Write-Host ''
+    Write-Host "Filter current bucket entries. Leave blank to clear the filter." -ForegroundColor Cyan
+    $prompt = if ([string]::IsNullOrWhiteSpace($CurrentFilter)) { 'Filter' } else { "Filter [$CurrentFilter]" }
+    return Read-Host -Prompt $prompt
+}
+
 function Invoke-SfAdMonitorShortcut {
     [CmdletBinding()]
     param(
@@ -351,6 +363,24 @@ do {
                             if ($lastStatus) {
                                 Invoke-SfAdMonitorShortcut -Action CopyReportPath -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
                             }
+                            $refreshRequested = $true
+                            break
+                        }
+                        '/' {
+                            $uiState.focus = 'Detail'
+                            $filterText = Read-SfAdMonitorFilterText -CurrentFilter $uiState.filterText
+                            $uiState.filterText = if ([string]::IsNullOrWhiteSpace($filterText)) { '' } else { $filterText.Trim() }
+                            if ([string]::IsNullOrWhiteSpace($uiState.filterText)) {
+                                $uiState.statusMessage = 'Cleared detail filter.'
+                            } else {
+                                $uiState.statusMessage = "Filter applied: $($uiState.filterText)"
+                            }
+                            $refreshRequested = $true
+                            break
+                        }
+                        'c' {
+                            $uiState.filterText = ''
+                            $uiState.statusMessage = 'Cleared detail filter.'
                             $refreshRequested = $true
                             break
                         }

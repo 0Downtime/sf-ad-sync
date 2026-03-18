@@ -439,7 +439,8 @@ function New-SfAdMonitorUiState {
         selectedRunIndex = 0
         selectedBucketIndex = 0
         focus = 'History'
-        statusMessage = 'Ready. Keys: q quit, r refresh, tab focus, arrows or j/k select run, [ ] bucket, p preflight, d dry-run, o open path, y copy path.'
+        filterText = ''
+        statusMessage = 'Ready. Keys: q quit, r refresh, tab focus, arrows or j/k select run, [ ] bucket, / filter, c clear filter, p preflight, d dry-run, o open path, y copy path.'
         commandOutput = @()
     }
 }
@@ -455,6 +456,11 @@ function Get-SfAdMonitorBucketDefinitions {
         [pscustomobject]@{ Name = 'guardrailFailures'; Label = 'Guardrails' }
         [pscustomobject]@{ Name = 'creates'; Label = 'Creates' }
         [pscustomobject]@{ Name = 'updates'; Label = 'Updates' }
+        [pscustomobject]@{ Name = 'enables'; Label = 'Enables' }
+        [pscustomobject]@{ Name = 'disables'; Label = 'Disables' }
+        [pscustomobject]@{ Name = 'graveyardMoves'; Label = 'Graveyard Moves' }
+        [pscustomobject]@{ Name = 'deletions'; Label = 'Deletions' }
+        [pscustomobject]@{ Name = 'unchanged'; Label = 'Unchanged' }
     )
 }
 
@@ -600,6 +606,38 @@ function ConvertTo-SfAdMonitorInlineText {
     return "$Value"
 }
 
+function Test-SfAdMonitorItemMatchesFilter {
+    [CmdletBinding()]
+    param(
+        $Item,
+        [string]$FilterText
+    )
+
+    if ([string]::IsNullOrWhiteSpace($FilterText)) {
+        return $true
+    }
+
+    $needle = $FilterText.Trim().ToLowerInvariant()
+    $haystack = (ConvertTo-SfAdMonitorInlineText -Value $Item).ToLowerInvariant()
+    return $haystack.Contains($needle)
+}
+
+function Get-SfAdMonitorFilteredBucketItems {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$BucketSelection,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    return @(
+        @($BucketSelection.Items) | Where-Object {
+            Test-SfAdMonitorItemMatchesFilter -Item $_ -FilterText $UiState.filterText
+        }
+    )
+}
+
 function Format-SfAdMonitorDashboardView {
     [CmdletBinding()]
     param(
@@ -611,7 +649,7 @@ function Format-SfAdMonitorDashboardView {
 
     $selectedRun = Get-SfAdMonitorSelectedRun -Status $Status -UiState $UiState
     $selectedBucket = Get-SfAdMonitorSelectedBucket -Status $Status -UiState $UiState
-    $bucketIndex = [math]::Min([math]::Max([int]$UiState.selectedBucketIndex, 0), (@(Get-SfAdMonitorBucketDefinitions).Count - 1))
+    $filteredItems = @(Get-SfAdMonitorFilteredBucketItems -BucketSelection $selectedBucket -UiState $UiState)
     $lines = [System.Collections.Generic.List[string]]::new()
     $panelWidth = 110
     $topBorder = "╔" + ("═" * ($panelWidth - 2)) + "╗"
@@ -624,6 +662,7 @@ function Format-SfAdMonitorDashboardView {
     $lines.Add("║ SuccessFactors AD Sync Dashboard [$latestState]")
     $lines.Add("║ Config: $($Status.paths.configPath)")
     $lines.Add("║ Refreshed: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))    Focus: $($UiState.focus)    Selected run: $([math]::Min([int]$UiState.selectedRunIndex + 1, [math]::Max(@($Status.recentRuns).Count, 1))) / $([math]::Max(@($Status.recentRuns).Count, 1))    Bucket: $($selectedBucket.Bucket.Label)")
+    $lines.Add("║ Filter: $(if ([string]::IsNullOrWhiteSpace($UiState.filterText)) { '(none)' } else { $UiState.filterText })    Matching entries: $($filteredItems.Count) / $(@($selectedBucket.Items).Count)")
     $lines.Add($midBorder)
     $lines.Add('▓ Current Run')
     $lines.Add("Status: $($Status.currentRun.status)    Stage: $($Status.currentRun.stage)    Mode: $($Status.currentRun.mode)    DryRun: $($Status.currentRun.dryRun)")
@@ -672,13 +711,15 @@ function Format-SfAdMonitorDashboardView {
     $lines.Add("▓ Detail: $($selectedBucket.Bucket.Label) for $(if ($selectedRun.runId) { $selectedRun.runId } else { 'no-run' })")
     if (@($selectedBucket.Items).Count -eq 0) {
         $lines.Add('No entries in the selected bucket.')
+    } elseif ($filteredItems.Count -eq 0) {
+        $lines.Add('No entries match the active filter.')
     } else {
-        foreach ($item in @($selectedBucket.Items) | Select-Object -First 8) {
+        foreach ($item in $filteredItems | Select-Object -First 8) {
             $lines.Add("- $(ConvertTo-SfAdMonitorInlineText -Value $item)")
         }
 
-        if (@($selectedBucket.Items).Count -gt 8) {
-            $lines.Add("... $(@($selectedBucket.Items).Count - 8) more")
+        if ($filteredItems.Count -gt 8) {
+            $lines.Add("... $($filteredItems.Count - 8) more")
         }
     }
 
@@ -692,9 +733,9 @@ function Format-SfAdMonitorDashboardView {
 
     $lines.Add($midBorder)
     $lines.Add("║ Status: $($UiState.statusMessage)")
-    $lines.Add('║ Keys: q quit, r refresh, tab focus, up/down or j/k select run, [ or ] bucket, enter inspect, p preflight, d dry-run, o open report, y copy report path')
+    $lines.Add('║ Keys: q quit, r refresh, tab focus, up/down or j/k select run, [ or ] bucket, / filter, c clear filter, enter inspect, p preflight, d dry-run, o open report, y copy report path')
     $lines.Add($bottomBorder)
     return $lines
 }
 
-Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView
+Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems
