@@ -137,6 +137,56 @@ Describe 'Monitoring module' {
         $operation.after.title | Should -Be 'New Title'
     }
 
+    It 'formats selected update objects as compact diffs' {
+        $selectedItem = [pscustomobject]@{
+            workerId = '1001'
+            samAccountName = 'jdoe'
+            changedAttributes = @('title', 'department')
+        }
+        $selectedOperation = [pscustomobject]@{
+            operationType = 'UpdateAttributes'
+            target = [pscustomobject]@{
+                samAccountName = 'jdoe'
+            }
+            before = [pscustomobject]@{
+                title = 'Old Title'
+                department = 'Finance'
+            }
+            after = [pscustomobject]@{
+                title = 'New Title'
+                department = 'Engineering'
+            }
+        }
+
+        $lines = @(Format-SfAdMonitorSelectedObjectLines -SelectedItem $selectedItem -SelectedOperation $selectedOperation)
+
+        ($lines -join "`n") | Should -Match 'Item: workerId=1001'
+        ($lines -join "`n") | Should -Match 'Δ title: Old Title -> New Title'
+        ($lines -join "`n") | Should -Match 'Δ department: Finance -> Engineering'
+    }
+
+    It 'formats create and delete style operations without generic blobs' {
+        $createLines = @(Format-SfAdMonitorSelectedObjectLines `
+                -SelectedItem ([pscustomobject]@{ workerId = '1001'; samAccountName = 'jdoe' }) `
+                -SelectedOperation ([pscustomobject]@{
+                    operationType = 'CreateUser'
+                    target = [pscustomobject]@{ samAccountName = 'jdoe' }
+                    before = $null
+                    after = [pscustomobject]@{ samAccountName = 'jdoe'; enabled = 'True' }
+                }))
+        $deleteLines = @(Format-SfAdMonitorSelectedObjectLines `
+                -SelectedItem ([pscustomobject]@{ workerId = '1002'; samAccountName = 'adoe' }) `
+                -SelectedOperation ([pscustomobject]@{
+                    operationType = 'DeleteUser'
+                    target = [pscustomobject]@{ samAccountName = 'adoe' }
+                    before = [pscustomobject]@{ samAccountName = 'adoe'; enabled = 'False' }
+                    after = $null
+                }))
+
+        ($createLines -join "`n") | Should -Match 'Δ samAccountName: \(unset\) -> jdoe'
+        ($deleteLines -join "`n") | Should -Match 'Δ samAccountName: adoe -> \(unset\)'
+    }
+
     It 'resolves selected worker state from tracked workers' {
         $status = [pscustomobject]@{
             currentRun = [pscustomobject]@{
@@ -306,6 +356,7 @@ Describe 'Monitoring module' {
         ($lines -join "`n") | Should -Match 'Diagnostics:'
         ($lines -join "`n") | Should -Match 'Selected Object'
         ($lines -join "`n") | Should -Match 'Worker State'
+        ($lines -join "`n") | Should -Match 'Operation: no matching reversible operation'
         ($lines -join "`n") | Should -Match 'workerId=1002'
     }
 }

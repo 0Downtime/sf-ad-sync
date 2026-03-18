@@ -848,6 +848,118 @@ function Get-SfAdMonitorCurrentRunDiagnostics {
     }
 }
 
+function Get-SfAdMonitorPropertyPairs {
+    [CmdletBinding()]
+    param($Value)
+
+    if ($null -eq $Value) {
+        return @()
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        return @(
+            foreach ($key in $Value.Keys) {
+                [pscustomobject]@{
+                    Name = "$key"
+                    Value = $Value[$key]
+                }
+            }
+        )
+    }
+
+    return @(
+        $Value.PSObject.Properties | ForEach-Object {
+            [pscustomobject]@{
+                Name = $_.Name
+                Value = $_.Value
+            }
+        }
+    )
+}
+
+function Get-SfAdMonitorOperationDiffLines {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Operation
+    )
+
+    $beforeMap = @{}
+    foreach ($property in @(Get-SfAdMonitorPropertyPairs -Value $Operation.before)) {
+        $beforeMap[$property.Name] = ConvertTo-SfAdMonitorInlineText -Value $property.Value
+    }
+
+    $afterMap = @{}
+    foreach ($property in @(Get-SfAdMonitorPropertyPairs -Value $Operation.after)) {
+        $afterMap[$property.Name] = ConvertTo-SfAdMonitorInlineText -Value $property.Value
+    }
+
+    $keys = @($beforeMap.Keys + $afterMap.Keys | Sort-Object -Unique)
+    if ($keys.Count -eq 0) {
+        return @()
+    }
+
+    return @(
+        foreach ($key in $keys) {
+            $beforeValue = if ($beforeMap.ContainsKey($key)) { $beforeMap[$key] } else { '(unset)' }
+            $afterValue = if ($afterMap.ContainsKey($key)) { $afterMap[$key] } else { '(unset)' }
+            "${key}: $beforeValue -> $afterValue"
+        }
+    )
+}
+
+function Format-SfAdMonitorSelectedObjectLines {
+    [CmdletBinding()]
+    param(
+        $SelectedItem,
+        $SelectedOperation
+    )
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($SelectedItem) {
+        $summaryParts = [System.Collections.Generic.List[string]]::new()
+        foreach ($key in @('workerId','samAccountName','userPrincipalName','reason','threshold','targetOu')) {
+            if ($SelectedItem.PSObject.Properties.Name -contains $key -and -not [string]::IsNullOrWhiteSpace("$(($SelectedItem.$key))")) {
+                $summaryParts.Add("$key=$($SelectedItem.$key)")
+            }
+        }
+
+        if ($summaryParts.Count -eq 0) {
+            $summaryParts.Add((ConvertTo-SfAdMonitorInlineText -Value $SelectedItem))
+        }
+
+        $lines.Add("Item: $($summaryParts -join '    ')")
+    } else {
+        $lines.Add('No object is selected.')
+    }
+
+    if (-not $SelectedOperation) {
+        $lines.Add('Operation: no matching reversible operation recorded for the selected object.')
+        return $lines
+    }
+
+    $lines.Add("Operation: $($SelectedOperation.operationType)    Target: $(ConvertTo-SfAdMonitorInlineText -Value $SelectedOperation.target)")
+    $diffLines = @(Get-SfAdMonitorOperationDiffLines -Operation $SelectedOperation)
+    if ($diffLines.Count -eq 0) {
+        if ($null -ne $SelectedOperation.after) {
+            $lines.Add("After: $(ConvertTo-SfAdMonitorInlineText -Value $SelectedOperation.after)")
+        } elseif ($null -ne $SelectedOperation.before) {
+            $lines.Add("Before: $(ConvertTo-SfAdMonitorInlineText -Value $SelectedOperation.before)")
+        }
+        return $lines
+    }
+
+    foreach ($line in $diffLines | Select-Object -First 6) {
+        $lines.Add("Δ $line")
+    }
+
+    if ($diffLines.Count -gt 6) {
+        $lines.Add("... $($diffLines.Count - 6) more changes")
+    }
+
+    return $lines
+}
+
 function Get-SfAdMonitorRunDelta {
     [CmdletBinding()]
     param(
@@ -980,17 +1092,8 @@ function Format-SfAdMonitorDashboardView {
 
     $lines.Add($rule)
     $lines.Add('▓ Selected Object')
-    if ($selectedItem) {
-        $lines.Add("Item: $(ConvertTo-SfAdMonitorInlineText -Value $selectedItem)")
-    } else {
-        $lines.Add('No object is selected.')
-    }
-    if ($selectedOperation) {
-        $lines.Add("Operation: $($selectedOperation.operationType)    Target: $(ConvertTo-SfAdMonitorInlineText -Value $selectedOperation.target)")
-        $lines.Add("Before: $(ConvertTo-SfAdMonitorInlineText -Value $selectedOperation.before)")
-        $lines.Add("After: $(ConvertTo-SfAdMonitorInlineText -Value $selectedOperation.after)")
-    } else {
-        $lines.Add('Operation: no matching reversible operation recorded for the selected object.')
+    foreach ($line in @(Format-SfAdMonitorSelectedObjectLines -SelectedItem $selectedItem -SelectedOperation $selectedOperation)) {
+        $lines.Add($line)
     }
 
     $lines.Add($rule)
@@ -1023,4 +1126,4 @@ function Format-SfAdMonitorDashboardView {
     return $lines
 }
 
-Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems, Get-SfAdMonitorSelectedBucketItem, Get-SfAdMonitorSelectedBucketOperation, Get-SfAdMonitorFailureGroups, Get-SfAdMonitorSelectedWorkerState, Get-SfAdMonitorCurrentRunDiagnostics
+Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems, Get-SfAdMonitorSelectedBucketItem, Get-SfAdMonitorSelectedBucketOperation, Get-SfAdMonitorFailureGroups, Get-SfAdMonitorSelectedWorkerState, Get-SfAdMonitorCurrentRunDiagnostics, Get-SfAdMonitorOperationDiffLines, Format-SfAdMonitorSelectedObjectLines
