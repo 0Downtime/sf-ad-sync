@@ -70,6 +70,7 @@ Planned work is ordered by delivery priority so the roadmap is easy to scan from
 - `scripts/Register-SfAdSyncScheduledTask.ps1`: scheduled task bootstrap.
 - `scripts/Get-SfAdSyncStatus.ps1`: summary view of the latest sync report and runtime state.
 - `scripts/Watch-SfAdSyncMonitor.ps1`: terminal dashboard for current sync stage and recent run history.
+- `scripts/Install-SfAdSyncTerminalCommand.ps1`: installs the `synctui` terminal command for launching the dashboard from any shell.
 - `scripts/Invoke-TestSuite.ps1`: run the Pester test suite.
 - `scripts/Undo-SfAdSyncRun.ps1`: rollback one sync run using the recorded operation journal.
 - `tests`: Pester tests for config and mapping behavior.
@@ -83,6 +84,22 @@ Planned work is ordered by delivery priority so the roadmap is easy to scan from
 6. Run a dry-run first.
 
 ## Usage
+If you want the terminal dashboard to be the main operator entry point, install the `synctui` command once:
+
+```powershell
+pwsh ./scripts/Install-SfAdSyncTerminalCommand.ps1 `
+  -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json `
+  -MappingConfigPath ./config/local.successfactors-to-ad.mapping-config.json
+```
+
+The installer writes `synctui`, `synctui.cmd`, and `synctui.ps1` shims into a user bin directory, updates `PATH` when needed, and points them at your chosen config files. Open a new terminal after the install if your shell has not picked up the PATH change yet, then launch the dashboard with:
+
+```powershell
+synctui
+```
+
+The command forwards any extra monitor flags to [`scripts/Watch-SfAdSyncMonitor.ps1`](/Users/chrisbrien/dev/github.com/sf-ad-sync/scripts/Watch-SfAdSyncMonitor.ps1), for example `synctui -RunOnce -AsText`.
+
 ```powershell
 pwsh ./src/Invoke-SfAdSync.ps1 `
   -ConfigPath ./config/local.real-successfactors.real-ad.sync-config.json `

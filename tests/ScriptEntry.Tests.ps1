@@ -656,6 +656,81 @@ param(
         $result | Should -Match 'Monitor error'
     }
 
+    It 'installs synctui shims that point at the dashboard with explicit config paths' {
+        $projectRoot = Join-Path $TestDrive 'install-project'
+        $configDirectory = Join-Path $projectRoot 'config'
+        $scriptsDirectory = Join-Path $projectRoot 'scripts'
+        $installDirectory = Join-Path $TestDrive 'bin'
+        $configPath = Join-Path $configDirectory 'tenant.sync-config.json'
+        $mappingPath = Join-Path $configDirectory 'tenant.mapping-config.json'
+
+        New-Item -Path $configDirectory -ItemType Directory -Force | Out-Null
+        New-Item -Path $scriptsDirectory -ItemType Directory -Force | Out-Null
+        '{}' | Set-Content -Path $configPath
+        '{}' | Set-Content -Path $mappingPath
+        '# dashboard stub' | Set-Content -Path (Join-Path $scriptsDirectory 'Watch-SfAdSyncMonitor.ps1')
+
+        $result = & "$PSScriptRoot/../scripts/Install-SfAdSyncTerminalCommand.ps1" `
+            -ProjectRoot $projectRoot `
+            -InstallDirectory $installDirectory `
+            -ConfigPath $configPath `
+            -MappingConfigPath $mappingPath `
+            -SkipPathUpdate
+
+        $result.commandName | Should -Be 'synctui'
+        $result.configPath | Should -Be ([System.IO.Path]::GetFullPath($configPath))
+        $result.mappingConfigPath | Should -Be ([System.IO.Path]::GetFullPath($mappingPath))
+        $result.pathUpdated | Should -BeFalse
+
+        Test-Path -Path $result.shellCommandPath | Should -BeTrue
+        Test-Path -Path $result.cmdCommandPath | Should -BeTrue
+        Test-Path -Path $result.ps1CommandPath | Should -BeTrue
+
+        (Get-Content -Path $result.shellCommandPath -Raw) | Should -Match ([regex]::Escape([System.IO.Path]::GetFullPath((Join-Path $scriptsDirectory 'Watch-SfAdSyncMonitor.ps1'))))
+        (Get-Content -Path $result.shellCommandPath -Raw) | Should -Match ([regex]::Escape([System.IO.Path]::GetFullPath($configPath)))
+        (Get-Content -Path $result.shellCommandPath -Raw) | Should -Match ([regex]::Escape([System.IO.Path]::GetFullPath($mappingPath)))
+        (Get-Content -Path $result.cmdCommandPath -Raw) | Should -Match 'pwsh'
+        (Get-Content -Path $result.ps1CommandPath -Raw) | Should -Match 'MappingConfigPath'
+    }
+
+    It 'auto-discovers local config files and persists PATH updates for the installed command' {
+        $projectRoot = Join-Path $TestDrive 'auto-install-project'
+        $configDirectory = Join-Path $projectRoot 'config'
+        $scriptsDirectory = Join-Path $projectRoot 'scripts'
+        $installDirectory = Join-Path $TestDrive 'auto-bin'
+        $profilePath = Join-Path $TestDrive 'profiles/.zprofile'
+        $originalPath = $env:PATH
+        $originalShell = $env:SHELL
+
+        New-Item -Path $configDirectory -ItemType Directory -Force | Out-Null
+        New-Item -Path $scriptsDirectory -ItemType Directory -Force | Out-Null
+        '{}' | Set-Content -Path (Join-Path $configDirectory 'local.real.sync-config.json')
+        '{}' | Set-Content -Path (Join-Path $configDirectory 'local.real.mapping-config.json')
+        '# dashboard stub' | Set-Content -Path (Join-Path $scriptsDirectory 'Watch-SfAdSyncMonitor.ps1')
+
+        try {
+            $env:PATH = '/usr/bin'
+            $env:SHELL = '/bin/zsh'
+
+            $result = & "$PSScriptRoot/../scripts/Install-SfAdSyncTerminalCommand.ps1" `
+                -ProjectRoot $projectRoot `
+                -InstallDirectory $installDirectory `
+                -ShellProfilePath $profilePath
+
+            $result.configPath | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $configDirectory 'local.real.sync-config.json')))
+            $result.mappingConfigPath | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $configDirectory 'local.real.mapping-config.json')))
+            $result.pathUpdated | Should -BeTrue
+            $result.currentSessionPathUpdated | Should -BeTrue
+            $result.shellProfilePath | Should -Be ([System.IO.Path]::GetFullPath($profilePath))
+
+            ($env:PATH -split [System.IO.Path]::PathSeparator) | Should -Contain ([System.IO.Path]::GetFullPath($installDirectory))
+            (Get-Content -Path $profilePath -Raw) | Should -Match ([regex]::Escape([System.IO.Path]::GetFullPath($installDirectory)))
+        } finally {
+            $env:PATH = $originalPath
+            $env:SHELL = $originalShell
+        }
+    }
+
     It 'runs the synthetic dry-run entry script as a bounded smoke test' {
         $outputDirectory = Join-Path $TestDrive 'synthetic-output'
         $expectedReportPath = Join-Path $outputDirectory 'synthetic-report.json'
