@@ -693,6 +693,53 @@ param(
         (Get-Content -Path $result.ps1CommandPath -Raw) | Should -Match 'MappingConfigPath'
     }
 
+    It 'runs the generated synctui powershell shim with named config forwarding and extra monitor args' {
+        $projectRoot = Join-Path $TestDrive 'invoke-install-project'
+        $configDirectory = Join-Path $projectRoot 'config'
+        $scriptsDirectory = Join-Path $projectRoot 'scripts'
+        $installDirectory = Join-Path $TestDrive 'invoke-bin'
+        $configPath = Join-Path $configDirectory 'tenant.sync-config.json'
+        $mappingPath = Join-Path $configDirectory 'tenant.mapping-config.json'
+        $dashboardPath = Join-Path $scriptsDirectory 'Watch-SfAdSyncMonitor.ps1'
+
+        New-Item -Path $configDirectory -ItemType Directory -Force | Out-Null
+        New-Item -Path $scriptsDirectory -ItemType Directory -Force | Out-Null
+        '{}' | Set-Content -Path $configPath
+        '{}' | Set-Content -Path $mappingPath
+        @'
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [string]$ConfigPath,
+    [string]$MappingConfigPath,
+    [ValidateRange(1, 3600)]
+    [int]$RefreshIntervalSeconds = 3,
+    [switch]$RunOnce
+)
+
+[pscustomobject]@{
+    configPath = $ConfigPath
+    mappingConfigPath = $MappingConfigPath
+    refreshIntervalSeconds = $RefreshIntervalSeconds
+    runOnce = [bool]$RunOnce
+} | ConvertTo-Json -Compress
+'@ | Set-Content -Path $dashboardPath
+
+        $installResult = & "$PSScriptRoot/../scripts/Install-SfAdSyncTerminalCommand.ps1" `
+            -ProjectRoot $projectRoot `
+            -InstallDirectory $installDirectory `
+            -ConfigPath $configPath `
+            -MappingConfigPath $mappingPath `
+            -SkipPathUpdate
+
+        $result = & $installResult.ps1CommandPath -RefreshIntervalSeconds 9 -RunOnce | ConvertFrom-Json
+
+        $result.configPath | Should -Be ([System.IO.Path]::GetFullPath($configPath))
+        $result.mappingConfigPath | Should -Be ([System.IO.Path]::GetFullPath($mappingPath))
+        $result.refreshIntervalSeconds | Should -Be 9
+        $result.runOnce | Should -BeTrue
+    }
+
     It 'auto-discovers local config files and persists PATH updates for the installed command' {
         $projectRoot = Join-Path $TestDrive 'auto-install-project'
         $configDirectory = Join-Path $projectRoot 'config'

@@ -165,31 +165,61 @@ function Get-SfAdPowerShellShimContent {
         [string]$ResolvedMappingConfigPath
     )
 
-    $mappingArgumentBlock = if ([string]::IsNullOrWhiteSpace($ResolvedMappingConfigPath)) {
-        ''
-    } else {
-        @"
-`$argumentList += @('-MappingConfigPath', $(ConvertTo-SfAdPowerShellLiteral -Value $ResolvedMappingConfigPath))
-"@
-    }
+    $resolvedMappingConfigLiteral = ConvertTo-SfAdPowerShellLiteral -Value $ResolvedMappingConfigPath
 
     return @"
-[CmdletBinding()]
-param()
+[CmdletBinding(PositionalBinding = `$false)]
+param(
+    [string]`$ConfigPath,
+    [string]`$MappingConfigPath,
+    [ValidateRange(1, 3600)]
+    [int]`$RefreshIntervalSeconds,
+    [ValidateRange(1, 1000)]
+    [int]`$HistoryLimit,
+    [switch]`$RunOnce,
+    [switch]`$AsText
+)
 
 Set-StrictMode -Version Latest
 `$ErrorActionPreference = 'Stop'
 
-`$argumentList = @(
-    '-ConfigPath'
+`$effectiveConfigPath = if (`$PSBoundParameters.ContainsKey('ConfigPath')) {
+    `$ConfigPath
+} else {
     $(ConvertTo-SfAdPowerShellLiteral -Value $ResolvedConfigPath)
-)
-$mappingArgumentBlock
-if (`$args.Count -gt 0) {
-    `$argumentList += `$args
 }
 
-& $(ConvertTo-SfAdPowerShellLiteral -Value $DashboardPath) @argumentList
+`$effectiveMappingConfigPath = if (`$PSBoundParameters.ContainsKey('MappingConfigPath')) {
+    `$MappingConfigPath
+} else {
+    $resolvedMappingConfigLiteral
+}
+
+`$namedArguments = @{
+    ConfigPath = `$effectiveConfigPath
+}
+
+if (-not [string]::IsNullOrWhiteSpace("`$effectiveMappingConfigPath")) {
+    `$namedArguments['MappingConfigPath'] = `$effectiveMappingConfigPath
+}
+
+if (`$PSBoundParameters.ContainsKey('RefreshIntervalSeconds')) {
+    `$namedArguments['RefreshIntervalSeconds'] = `$RefreshIntervalSeconds
+}
+
+if (`$PSBoundParameters.ContainsKey('HistoryLimit')) {
+    `$namedArguments['HistoryLimit'] = `$HistoryLimit
+}
+
+if (`$RunOnce) {
+    `$namedArguments['RunOnce'] = `$true
+}
+
+if (`$AsText) {
+    `$namedArguments['AsText'] = `$true
+}
+
+& $(ConvertTo-SfAdPowerShellLiteral -Value $DashboardPath) @namedArguments
 exit `$LASTEXITCODE
 "@
 }

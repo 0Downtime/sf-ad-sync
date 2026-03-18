@@ -98,7 +98,7 @@ The installer writes `synctui`, `synctui.cmd`, and `synctui.ps1` shims into a us
 synctui
 ```
 
-The command forwards any extra monitor flags to [`scripts/Watch-SfAdSyncMonitor.ps1`](/Users/chrisbrien/dev/github.com/sf-ad-sync/scripts/Watch-SfAdSyncMonitor.ps1), for example `synctui -RunOnce -AsText`.
+The command supports the dashboard's normal monitor flags from [`scripts/Watch-SfAdSyncMonitor.ps1`](/Users/chrisbrien/dev/github.com/sf-ad-sync/scripts/Watch-SfAdSyncMonitor.ps1), for example `synctui -RunOnce -AsText`.
 
 ```powershell
 pwsh ./src/Invoke-SfAdSync.ps1 `
