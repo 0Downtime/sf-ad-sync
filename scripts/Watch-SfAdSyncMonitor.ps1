@@ -145,6 +145,30 @@ function Read-SfAdMonitorFilterText {
     return Read-Host -Prompt $prompt
 }
 
+function Export-SfAdMonitorBucketSelection {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $bucketSelection = Get-SfAdMonitorSelectedBucket -Status $Status -UiState $UiState
+    $items = @(Get-SfAdMonitorFilteredBucketItems -BucketSelection $bucketSelection -UiState $UiState)
+    if ($items.Count -eq 0) {
+        $UiState.statusMessage = 'Export skipped: no filtered bucket entries to export.'
+        $UiState.commandOutput = @()
+        return
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $path = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath "sf-ad-sync-monitor-$($bucketSelection.Bucket.Name)-$timestamp.json"
+    $items | ConvertTo-Json -Depth 20 | Set-Content -Path $path
+    $UiState.statusMessage = "Exported filtered bucket to $path"
+    $UiState.commandOutput = @($path)
+}
+
 function Invoke-SfAdMonitorShortcut {
     [CmdletBinding()]
     param(
@@ -276,6 +300,7 @@ do {
                 }
                 'UpArrow' {
                     $uiState.selectedRunIndex = [math]::Max([int]$uiState.selectedRunIndex - 1, 0)
+                    $uiState.selectedItemIndex = 0
                     $uiState.focus = 'History'
                     $uiState.statusMessage = 'Selected previous run.'
                     $refreshRequested = $true
@@ -284,8 +309,28 @@ do {
                 'DownArrow' {
                     $maxRunIndex = if ($lastStatus) { [math]::Max(@($lastStatus.recentRuns).Count - 1, 0) } else { 0 }
                     $uiState.selectedRunIndex = [math]::Min([int]$uiState.selectedRunIndex + 1, $maxRunIndex)
+                    $uiState.selectedItemIndex = 0
                     $uiState.focus = 'History'
                     $uiState.statusMessage = 'Selected next run.'
+                    $refreshRequested = $true
+                    break
+                }
+                'LeftArrow' {
+                    $uiState.selectedItemIndex = [math]::Max([int]$uiState.selectedItemIndex - 1, 0)
+                    $uiState.focus = 'Detail'
+                    $uiState.statusMessage = 'Selected previous object.'
+                    $refreshRequested = $true
+                    break
+                }
+                'RightArrow' {
+                    $maxItemIndex = 0
+                    if ($lastStatus) {
+                        $bucketSelection = Get-SfAdMonitorSelectedBucket -Status $lastStatus -UiState $uiState
+                        $maxItemIndex = [math]::Max(@(Get-SfAdMonitorFilteredBucketItems -BucketSelection $bucketSelection -UiState $uiState).Count - 1, 0)
+                    }
+                    $uiState.selectedItemIndex = [math]::Min([int]$uiState.selectedItemIndex + 1, $maxItemIndex)
+                    $uiState.focus = 'Detail'
+                    $uiState.statusMessage = 'Selected next object.'
                     $refreshRequested = $true
                     break
                 }
@@ -311,6 +356,7 @@ do {
                         'j' {
                             $maxRunIndex = if ($lastStatus) { [math]::Max(@($lastStatus.recentRuns).Count - 1, 0) } else { 0 }
                             $uiState.selectedRunIndex = [math]::Min([int]$uiState.selectedRunIndex + 1, $maxRunIndex)
+                            $uiState.selectedItemIndex = 0
                             $uiState.focus = 'History'
                             $uiState.statusMessage = 'Selected next run.'
                             $refreshRequested = $true
@@ -318,13 +364,34 @@ do {
                         }
                         'k' {
                             $uiState.selectedRunIndex = [math]::Max([int]$uiState.selectedRunIndex - 1, 0)
+                            $uiState.selectedItemIndex = 0
                             $uiState.focus = 'History'
                             $uiState.statusMessage = 'Selected previous run.'
                             $refreshRequested = $true
                             break
                         }
+                        'h' {
+                            $uiState.selectedItemIndex = [math]::Max([int]$uiState.selectedItemIndex - 1, 0)
+                            $uiState.focus = 'Detail'
+                            $uiState.statusMessage = 'Selected previous object.'
+                            $refreshRequested = $true
+                            break
+                        }
+                        'l' {
+                            $maxItemIndex = 0
+                            if ($lastStatus) {
+                                $bucketSelection = Get-SfAdMonitorSelectedBucket -Status $lastStatus -UiState $uiState
+                                $maxItemIndex = [math]::Max(@(Get-SfAdMonitorFilteredBucketItems -BucketSelection $bucketSelection -UiState $uiState).Count - 1, 0)
+                            }
+                            $uiState.selectedItemIndex = [math]::Min([int]$uiState.selectedItemIndex + 1, $maxItemIndex)
+                            $uiState.focus = 'Detail'
+                            $uiState.statusMessage = 'Selected next object.'
+                            $refreshRequested = $true
+                            break
+                        }
                         '[' {
                             $uiState.selectedBucketIndex = [math]::Max([int]$uiState.selectedBucketIndex - 1, 0)
+                            $uiState.selectedItemIndex = 0
                             $uiState.focus = 'Detail'
                             $uiState.statusMessage = 'Selected previous detail bucket.'
                             $refreshRequested = $true
@@ -333,6 +400,7 @@ do {
                         ']' {
                             $maxBucketIndex = [math]::Max(@(Get-SfAdMonitorBucketDefinitions).Count - 1, 0)
                             $uiState.selectedBucketIndex = [math]::Min([int]$uiState.selectedBucketIndex + 1, $maxBucketIndex)
+                            $uiState.selectedItemIndex = 0
                             $uiState.focus = 'Detail'
                             $uiState.statusMessage = 'Selected next detail bucket.'
                             $refreshRequested = $true
@@ -370,6 +438,7 @@ do {
                             $uiState.focus = 'Detail'
                             $filterText = Read-SfAdMonitorFilterText -CurrentFilter $uiState.filterText
                             $uiState.filterText = if ([string]::IsNullOrWhiteSpace($filterText)) { '' } else { $filterText.Trim() }
+                            $uiState.selectedItemIndex = 0
                             if ([string]::IsNullOrWhiteSpace($uiState.filterText)) {
                                 $uiState.statusMessage = 'Cleared detail filter.'
                             } else {
@@ -380,7 +449,15 @@ do {
                         }
                         'c' {
                             $uiState.filterText = ''
+                            $uiState.selectedItemIndex = 0
                             $uiState.statusMessage = 'Cleared detail filter.'
+                            $refreshRequested = $true
+                            break
+                        }
+                        'x' {
+                            if ($lastStatus) {
+                                Export-SfAdMonitorBucketSelection -Status $lastStatus -UiState $uiState
+                            }
                             $refreshRequested = $true
                             break
                         }

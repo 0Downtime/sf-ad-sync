@@ -340,6 +340,21 @@ function Get-SfAdMonitorStatus {
     $config = Get-SfAdSyncConfig -Path $ConfigPath
     $state = if ($config.state.path) { Get-SfAdSyncState -Path $config.state.path } else { [pscustomobject]@{ checkpoint = $null; workers = @{} } }
     $workerProperties = @(Get-SfAdWorkerEntries -Workers $state.workers)
+    $trackedWorkers = @(
+        $workerProperties |
+            Sort-Object Name |
+            ForEach-Object {
+                [pscustomobject]@{
+                    workerId = $_.Name
+                    adObjectGuid = if ($_.Value.PSObject.Properties.Name -contains 'adObjectGuid') { $_.Value.adObjectGuid } else { $null }
+                    distinguishedName = if ($_.Value.PSObject.Properties.Name -contains 'distinguishedName') { $_.Value.distinguishedName } else { $null }
+                    suppressed = if ($_.Value.PSObject.Properties.Name -contains 'suppressed') { [bool]$_.Value.suppressed } else { $false }
+                    firstDisabledAt = if ($_.Value.PSObject.Properties.Name -contains 'firstDisabledAt') { $_.Value.firstDisabledAt } else { $null }
+                    deleteAfter = if ($_.Value.PSObject.Properties.Name -contains 'deleteAfter') { $_.Value.deleteAfter } else { $null }
+                    lastSeenStatus = if ($_.Value.PSObject.Properties.Name -contains 'lastSeenStatus') { $_.Value.lastSeenStatus } else { $null }
+                }
+            }
+    )
     $suppressedWorkers = @($workerProperties | Where-Object { $_.Value.suppressed })
     $pendingDeletionWorkers = @(
         $suppressedWorkers | Where-Object {
@@ -370,6 +385,18 @@ function Get-SfAdMonitorStatus {
             totalTrackedWorkers = $workerProperties.Count
             suppressedWorkers = $suppressedWorkers.Count
             pendingDeletionWorkers = $pendingDeletionWorkers.Count
+        }
+        trackedWorkers = $trackedWorkers
+        context = [pscustomobject]@{
+            identityField = $config.successFactors.query.identityField
+            identityAttribute = $config.ad.identityAttribute
+            defaultActiveOu = $config.ad.defaultActiveOu
+            graveyardOu = $config.ad.graveyardOu
+            enableBeforeStartDays = $config.sync.enableBeforeStartDays
+            deletionRetentionDays = $config.sync.deletionRetentionDays
+            maxCreatesPerRun = if ($config.PSObject.Properties.Name -contains 'safety') { $config.safety.maxCreatesPerRun } else { $null }
+            maxDisablesPerRun = if ($config.PSObject.Properties.Name -contains 'safety') { $config.safety.maxDisablesPerRun } else { $null }
+            maxDeletionsPerRun = if ($config.PSObject.Properties.Name -contains 'safety') { $config.safety.maxDeletionsPerRun } else { $null }
         }
         paths = [pscustomobject]@{
             configPath = $resolvedConfigPath
@@ -438,9 +465,10 @@ function New-SfAdMonitorUiState {
     return [pscustomobject]@{
         selectedRunIndex = 0
         selectedBucketIndex = 0
+        selectedItemIndex = 0
         focus = 'History'
         filterText = ''
-        statusMessage = 'Ready. Keys: q quit, r refresh, tab focus, arrows or j/k select run, [ ] bucket, / filter, c clear filter, p preflight, d dry-run, o open path, y copy path.'
+        statusMessage = 'Ready. Keys: q quit, r refresh, tab focus, arrows or j/k select run, [ ] bucket, left/right or h/l select item, / filter, c clear filter, p preflight, d dry-run, o open path, y copy path, x export bucket.'
         commandOutput = @()
     }
 }
@@ -638,6 +666,210 @@ function Get-SfAdMonitorFilteredBucketItems {
     )
 }
 
+function Get-SfAdMonitorSelectedBucketItem {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$BucketSelection,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $items = @(Get-SfAdMonitorFilteredBucketItems -BucketSelection $BucketSelection -UiState $UiState)
+    if ($items.Count -eq 0) {
+        return $null
+    }
+
+    $index = [math]::Min([math]::Max([int]$UiState.selectedItemIndex, 0), $items.Count - 1)
+    return $items[$index]
+}
+
+function Get-SfAdMonitorSelectedWorkerId {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $bucketSelection = Get-SfAdMonitorSelectedBucket -Status $Status -UiState $UiState
+    $selectedItem = Get-SfAdMonitorSelectedBucketItem -BucketSelection $bucketSelection -UiState $UiState
+    if ($selectedItem -and $selectedItem.PSObject.Properties.Name -contains 'workerId' -and -not [string]::IsNullOrWhiteSpace("$($selectedItem.workerId)")) {
+        return "$($selectedItem.workerId)"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace("$($Status.currentRun.currentWorkerId)")) {
+        return "$($Status.currentRun.currentWorkerId)"
+    }
+
+    return $null
+}
+
+function Get-SfAdMonitorSelectedBucketOperation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $report = Get-SfAdMonitorSelectedRunReport -Status $Status -UiState $UiState
+    if (-not $report -or -not ($report.PSObject.Properties.Name -contains 'operations')) {
+        return $null
+    }
+
+    $bucketSelection = Get-SfAdMonitorSelectedBucket -Status $Status -UiState $UiState
+    $selectedItem = Get-SfAdMonitorSelectedBucketItem -BucketSelection $bucketSelection -UiState $UiState
+    $workerId = if ($selectedItem -and $selectedItem.PSObject.Properties.Name -contains 'workerId') { "$($selectedItem.workerId)" } else { $null }
+    if ([string]::IsNullOrWhiteSpace($workerId)) {
+        return $null
+    }
+
+    $operations = @($report.operations | Where-Object {
+        "$($_.workerId)" -eq $workerId -and "$($_.bucket)" -eq $bucketSelection.Bucket.Name
+    } | Sort-Object sequence -Descending)
+
+    if ($operations.Count -eq 0) {
+        return $null
+    }
+
+    return $operations[0]
+}
+
+function Get-SfAdMonitorFailureGroups {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$BucketSelection,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $items = @(Get-SfAdMonitorFilteredBucketItems -BucketSelection $BucketSelection -UiState $UiState)
+    return @(
+        $items |
+            Group-Object -Property {
+                if ($_.PSObject.Properties.Name -contains 'reason' -and -not [string]::IsNullOrWhiteSpace("$($_.reason)")) {
+                    return "reason:$($_.reason)"
+                }
+                if ($_.PSObject.Properties.Name -contains 'threshold' -and -not [string]::IsNullOrWhiteSpace("$($_.threshold)")) {
+                    return "threshold:$($_.threshold)"
+                }
+                return 'misc'
+            } |
+            Sort-Object `
+                @{ Expression = { $_.Count }; Descending = $true }, `
+                @{ Expression = { $_.Name }; Descending = $false } |
+            ForEach-Object {
+                $label = if ($_.Name -like 'reason:*') {
+                    $_.Name.Substring(7)
+                } elseif ($_.Name -like 'threshold:*') {
+                    $_.Name.Substring(10)
+                } else {
+                    'Other'
+                }
+
+                [pscustomobject]@{
+                    label = $label
+                    count = $_.Count
+                }
+            }
+    )
+}
+
+function Get-SfAdMonitorFilteredTrackedWorkers {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    return @(
+        @($Status.trackedWorkers) | Where-Object {
+            Test-SfAdMonitorItemMatchesFilter -Item $_ -FilterText $UiState.filterText
+        }
+    )
+}
+
+function Get-SfAdMonitorSelectedWorkerState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $workerId = Get-SfAdMonitorSelectedWorkerId -Status $Status -UiState $UiState
+    if ([string]::IsNullOrWhiteSpace($workerId)) {
+        return $null
+    }
+
+    $worker = @($Status.trackedWorkers | Where-Object { "$($_.workerId)" -eq $workerId })
+    if ($worker.Count -eq 0) {
+        return $null
+    }
+
+    return $worker[0]
+}
+
+function Get-SfAdMonitorCurrentRunDiagnostics {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$CurrentRun
+    )
+
+    $startedAt = Get-SfAdDateTimeOrNull -Value $CurrentRun.startedAt
+    $lastUpdatedAt = Get-SfAdDateTimeOrNull -Value $CurrentRun.lastUpdatedAt
+    $now = [datetimeoffset](Get-Date)
+    $elapsedSeconds = if ($startedAt) { [int][math]::Max(0, [math]::Round(($now - $startedAt).TotalSeconds)) } else { $null }
+    $refreshLagSeconds = if ($lastUpdatedAt) { [int][math]::Max(0, [math]::Round(($now - $lastUpdatedAt).TotalSeconds)) } else { $null }
+    $throughput = if ($elapsedSeconds -and $elapsedSeconds -gt 0 -and $CurrentRun.processedWorkers -gt 0) {
+        [math]::Round(($CurrentRun.processedWorkers / $elapsedSeconds), 2)
+    } else {
+        $null
+    }
+    $etaSeconds = if ($throughput -and $throughput -gt 0 -and $CurrentRun.totalWorkers -gt $CurrentRun.processedWorkers) {
+        [int][math]::Ceiling((($CurrentRun.totalWorkers - $CurrentRun.processedWorkers) / $throughput))
+    } else {
+        $null
+    }
+
+    return [pscustomobject]@{
+        elapsedSeconds = $elapsedSeconds
+        refreshLagSeconds = $refreshLagSeconds
+        throughput = $throughput
+        etaSeconds = $etaSeconds
+    }
+}
+
+function Get-SfAdMonitorRunDelta {
+    [CmdletBinding()]
+    param(
+        [pscustomobject]$ReferenceRun,
+        [pscustomobject]$ComparisonRun
+    )
+
+    if (-not $ReferenceRun -or -not $ComparisonRun) {
+        return $null
+    }
+
+    return [pscustomobject]@{
+        creates = [int]$ReferenceRun.creates - [int]$ComparisonRun.creates
+        updates = [int]$ReferenceRun.updates - [int]$ComparisonRun.updates
+        disables = [int]$ReferenceRun.disables - [int]$ComparisonRun.disables
+        deletions = [int]$ReferenceRun.deletions - [int]$ComparisonRun.deletions
+        quarantined = [int]$ReferenceRun.quarantined - [int]$ComparisonRun.quarantined
+        conflicts = [int]$ReferenceRun.conflicts - [int]$ComparisonRun.conflicts
+        guardrailFailures = [int]$ReferenceRun.guardrailFailures - [int]$ComparisonRun.guardrailFailures
+    }
+}
+
 function Format-SfAdMonitorDashboardView {
     [CmdletBinding()]
     param(
@@ -650,6 +882,16 @@ function Format-SfAdMonitorDashboardView {
     $selectedRun = Get-SfAdMonitorSelectedRun -Status $Status -UiState $UiState
     $selectedBucket = Get-SfAdMonitorSelectedBucket -Status $Status -UiState $UiState
     $filteredItems = @(Get-SfAdMonitorFilteredBucketItems -BucketSelection $selectedBucket -UiState $UiState)
+    $selectedItem = Get-SfAdMonitorSelectedBucketItem -BucketSelection $selectedBucket -UiState $UiState
+    $selectedOperation = Get-SfAdMonitorSelectedBucketOperation -Status $Status -UiState $UiState
+    $selectedWorkerState = Get-SfAdMonitorSelectedWorkerState -Status $Status -UiState $UiState
+    $failureGroups = @(Get-SfAdMonitorFailureGroups -BucketSelection $selectedBucket -UiState $UiState)
+    $diagnostics = Get-SfAdMonitorCurrentRunDiagnostics -CurrentRun $Status.currentRun
+    $comparisonRun = $null
+    if (@($Status.recentRuns).Count -gt ([int]$UiState.selectedRunIndex + 1)) {
+        $comparisonRun = @($Status.recentRuns)[[int]$UiState.selectedRunIndex + 1]
+    }
+    $runDelta = Get-SfAdMonitorRunDelta -ReferenceRun $selectedRun -ComparisonRun $comparisonRun
     $lines = [System.Collections.Generic.List[string]]::new()
     $panelWidth = 110
     $topBorder = "╔" + ("═" * ($panelWidth - 2)) + "╗"
@@ -662,7 +904,7 @@ function Format-SfAdMonitorDashboardView {
     $lines.Add("║ SuccessFactors AD Sync Dashboard [$latestState]")
     $lines.Add("║ Config: $($Status.paths.configPath)")
     $lines.Add("║ Refreshed: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))    Focus: $($UiState.focus)    Selected run: $([math]::Min([int]$UiState.selectedRunIndex + 1, [math]::Max(@($Status.recentRuns).Count, 1))) / $([math]::Max(@($Status.recentRuns).Count, 1))    Bucket: $($selectedBucket.Bucket.Label)")
-    $lines.Add("║ Filter: $(if ([string]::IsNullOrWhiteSpace($UiState.filterText)) { '(none)' } else { $UiState.filterText })    Matching entries: $($filteredItems.Count) / $(@($selectedBucket.Items).Count)")
+    $lines.Add("║ Filter: $(if ([string]::IsNullOrWhiteSpace($UiState.filterText)) { '(none)' } else { $UiState.filterText })    Matching entries: $($filteredItems.Count) / $(@($selectedBucket.Items).Count)    Selected item: $([math]::Min([int]$UiState.selectedItemIndex + 1, [math]::Max($filteredItems.Count, 1))) / $([math]::Max($filteredItems.Count, 1))")
     $lines.Add($midBorder)
     $lines.Add('▓ Current Run')
     $lines.Add("Status: $($Status.currentRun.status)    Stage: $($Status.currentRun.stage)    Mode: $($Status.currentRun.mode)    DryRun: $($Status.currentRun.dryRun)")
@@ -672,15 +914,23 @@ function Format-SfAdMonitorDashboardView {
         $lines.Add("Error: $($Status.currentRun.errorMessage)")
     }
     $lines.Add("Live counts: C=$($Status.currentRun.creates) U=$($Status.currentRun.updates) E=$($Status.currentRun.enables) D=$($Status.currentRun.disables) G=$($Status.currentRun.graveyardMoves) X=$($Status.currentRun.deletions) Q=$($Status.currentRun.quarantined) F=$($Status.currentRun.conflicts) GF=$($Status.currentRun.guardrailFailures) MR=$($Status.currentRun.manualReview) NC=$($Status.currentRun.unchanged)")
+    $lines.Add("Diagnostics: Elapsed=$(if ($null -ne $diagnostics.elapsedSeconds) { $diagnostics.elapsedSeconds } else { '-' })s    RefreshLag=$(if ($null -ne $diagnostics.refreshLagSeconds) { $diagnostics.refreshLagSeconds } else { '-' })s    Throughput=$(if ($null -ne $diagnostics.throughput) { $diagnostics.throughput } else { '-' })/s    ETA=$(if ($null -ne $diagnostics.etaSeconds) { $diagnostics.etaSeconds } else { '-' })s")
     $lines.Add($rule)
     $lines.Add('▓ Latest Run Summary')
     $lines.Add("Status: $($Status.latestRun.status)    Mode: $($Status.latestRun.mode)    DryRun: $($Status.latestRun.dryRun)    Started: $($Status.latestRun.startedAt)")
     $lines.Add("Duration(s): $($Status.latestRun.durationSeconds)    Reversible ops: $($Status.latestRun.reversibleOperations)")
     $lines.Add("Totals: C=$($Status.latestRun.creates) U=$($Status.latestRun.updates) E=$($Status.latestRun.enables) D=$($Status.latestRun.disables) G=$($Status.latestRun.graveyardMoves) X=$($Status.latestRun.deletions) Q=$($Status.latestRun.quarantined) F=$($Status.latestRun.conflicts) GF=$($Status.latestRun.guardrailFailures) MR=$($Status.latestRun.manualReview) NC=$($Status.latestRun.unchanged)")
+    if ($comparisonRun -and $runDelta) {
+        $lines.Add("Compared to older run $($comparisonRun.runId): ΔC=$($runDelta.creates) ΔU=$($runDelta.updates) ΔD=$($runDelta.disables) ΔX=$($runDelta.deletions) ΔQ=$($runDelta.quarantined) ΔF=$($runDelta.conflicts) ΔGF=$($runDelta.guardrailFailures)")
+    }
     $lines.Add($rule)
     $lines.Add('▓ State Summary')
     $lines.Add("Checkpoint: $($Status.summary.lastCheckpoint)")
     $lines.Add("Tracked: $($Status.summary.totalTrackedWorkers)    Suppressed: $($Status.summary.suppressedWorkers)    Pending deletion: $($Status.summary.pendingDeletionWorkers)")
+    $lines.Add("Context: identityField=$($Status.context.identityField) identityAttribute=$($Status.context.identityAttribute) enableBefore=$($Status.context.enableBeforeStartDays)d deleteRetention=$($Status.context.deletionRetentionDays)d")
+    $lines.Add("OUs: active=$($Status.context.defaultActiveOu)    graveyard=$($Status.context.graveyardOu)")
+    $lines.Add("Safety: create=$($Status.context.maxCreatesPerRun) disable=$($Status.context.maxDisablesPerRun) delete=$($Status.context.maxDeletionsPerRun)")
+    $lines.Add("Paths: mapping=$(Resolve-SfAdMonitorMappingConfigPath -Status $Status)    state=$($Status.paths.statePath)")
     $lines.Add($rule)
     $lines.Add('▓ Recent Runs')
     $lines.Add(' Sel Status     Mode  Dry  Started             Dur(s) Create Update Disable Delete Conflict Guardrail')
@@ -709,17 +959,52 @@ function Format-SfAdMonitorDashboardView {
 
     $lines.Add($rule)
     $lines.Add("▓ Detail: $($selectedBucket.Bucket.Label) for $(if ($selectedRun.runId) { $selectedRun.runId } else { 'no-run' })")
+    if ($failureGroups.Count -gt 0 -and @('quarantined','conflicts','manualReview','guardrailFailures') -contains $selectedBucket.Bucket.Name) {
+        $groupText = @($failureGroups | Select-Object -First 4 | ForEach-Object { "$($_.label)=$($_.count)" }) -join '    '
+        $lines.Add("Reason groups: $groupText")
+    }
     if (@($selectedBucket.Items).Count -eq 0) {
         $lines.Add('No entries in the selected bucket.')
     } elseif ($filteredItems.Count -eq 0) {
         $lines.Add('No entries match the active filter.')
     } else {
-        foreach ($item in $filteredItems | Select-Object -First 8) {
-            $lines.Add("- $(ConvertTo-SfAdMonitorInlineText -Value $item)")
+        for ($i = 0; $i -lt [math]::Min($filteredItems.Count, 8); $i += 1) {
+            $prefix = if ($selectedItem -and $filteredItems[$i] -eq $selectedItem) { '>' } else { '-' }
+            $lines.Add("$prefix $(ConvertTo-SfAdMonitorInlineText -Value $filteredItems[$i])")
         }
 
         if ($filteredItems.Count -gt 8) {
             $lines.Add("... $($filteredItems.Count - 8) more")
+        }
+    }
+
+    $lines.Add($rule)
+    $lines.Add('▓ Selected Object')
+    if ($selectedItem) {
+        $lines.Add("Item: $(ConvertTo-SfAdMonitorInlineText -Value $selectedItem)")
+    } else {
+        $lines.Add('No object is selected.')
+    }
+    if ($selectedOperation) {
+        $lines.Add("Operation: $($selectedOperation.operationType)    Target: $(ConvertTo-SfAdMonitorInlineText -Value $selectedOperation.target)")
+        $lines.Add("Before: $(ConvertTo-SfAdMonitorInlineText -Value $selectedOperation.before)")
+        $lines.Add("After: $(ConvertTo-SfAdMonitorInlineText -Value $selectedOperation.after)")
+    } else {
+        $lines.Add('Operation: no matching reversible operation recorded for the selected object.')
+    }
+
+    $lines.Add($rule)
+    $lines.Add('▓ Worker State')
+    if ($selectedWorkerState) {
+        $lines.Add("Tracked: $(ConvertTo-SfAdMonitorInlineText -Value $selectedWorkerState)")
+    } else {
+        $stateMatches = @(Get-SfAdMonitorFilteredTrackedWorkers -Status $Status -UiState $UiState)
+        if ($stateMatches.Count -eq 0) {
+            $lines.Add('No tracked worker state matches the current context.')
+        } else {
+            foreach ($stateMatch in $stateMatches | Select-Object -First 4) {
+                $lines.Add("- $(ConvertTo-SfAdMonitorInlineText -Value $stateMatch)")
+            }
         }
     }
 
@@ -733,9 +1018,9 @@ function Format-SfAdMonitorDashboardView {
 
     $lines.Add($midBorder)
     $lines.Add("║ Status: $($UiState.statusMessage)")
-    $lines.Add('║ Keys: q quit, r refresh, tab focus, up/down or j/k select run, [ or ] bucket, / filter, c clear filter, enter inspect, p preflight, d dry-run, o open report, y copy report path')
+    $lines.Add('║ Keys: q quit, r refresh, tab focus, up/down or j/k select run, [ or ] bucket, left/right or h/l select item, / filter, c clear filter, enter inspect, p preflight, d dry-run, o open report, y copy report path, x export bucket')
     $lines.Add($bottomBorder)
     return $lines
 }
 
-Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems
+Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems, Get-SfAdMonitorSelectedBucketItem, Get-SfAdMonitorSelectedBucketOperation, Get-SfAdMonitorFailureGroups, Get-SfAdMonitorSelectedWorkerState, Get-SfAdMonitorCurrentRunDiagnostics
