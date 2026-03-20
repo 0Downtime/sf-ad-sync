@@ -513,7 +513,7 @@ function New-SfAdMonitorUiState {
         selectedItemIndex = 0
         focus = 'History'
         filterText = ''
-        autoRefreshEnabled = $true
+        autoRefreshEnabled = $false
         preferredMode = $null
         statusMessage = 'Ready. Keys: q quit, r refresh, t toggle auto-refresh, tab focus, arrows or j/k select run, [ ] bucket, left/right or h/l select item, / filter, c clear filter, p preflight, d delta dry-run, s delta sync, f full dry-run, a full sync, w worker preview, v review, o open path, y copy path, x export bucket.'
         commandOutput = @()

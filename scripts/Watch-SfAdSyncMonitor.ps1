@@ -495,10 +495,8 @@ function Invoke-SfAdMonitorShortcut {
 $resolvedConfigPath = (Resolve-Path -Path $ConfigPath).Path
 $resolvedMappingConfigPath = Get-OptionalResolvedPath -Path $MappingConfigPath
 $uiState = New-SfAdMonitorUiState
-$uiState.autoRefreshEnabled = -not $PauseAutoRefresh
-if ($PauseAutoRefresh) {
-    $uiState.statusMessage = 'Auto-refresh paused. Press t to resume or r to refresh once.'
-}
+$uiState.autoRefreshEnabled = $false
+$uiState.statusMessage = 'Auto-refresh paused. Press t to resume or r to refresh once.'
 $lastStatus = $null
 
 do {

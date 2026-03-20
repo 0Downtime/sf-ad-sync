@@ -98,7 +98,7 @@ Describe 'Monitoring module' {
     It 'includes all run shortcuts in the default dashboard shortcut help' {
         $uiState = New-SfAdMonitorUiState
 
-        $uiState.autoRefreshEnabled | Should -BeTrue
+        $uiState.autoRefreshEnabled | Should -BeFalse
         $uiState.statusMessage | Should -Match 't toggle auto-refresh'
         $uiState.statusMessage | Should -Match 'd delta dry-run'
         $uiState.statusMessage | Should -Match 's delta sync'
@@ -374,7 +374,7 @@ Describe 'Monitoring module' {
         $lines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
 
         ($lines -join "`n") | Should -Match 'SuccessFactors AD Sync Dashboard'
-        ($lines -join "`n") | Should -Match 'AutoRefresh: On'
+        ($lines -join "`n") | Should -Match 'AutoRefresh: Paused'
         ($lines -join "`n") | Should -Match 'SF Auth=oauth \(body client auth\)'
         ($lines -join "`n") | Should -Match 'Detail: Quarantined'
         ($lines -join "`n") | Should -Match 'Filter: manager'
