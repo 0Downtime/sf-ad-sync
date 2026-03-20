@@ -342,6 +342,7 @@ function New-SfAdEmptyRunSummary {
         runId = $null
         path = $null
         artifactType = 'SyncReport'
+        workerScope = $null
         mode = $null
         dryRun = $false
         status = $null
@@ -398,6 +399,7 @@ function ConvertTo-SfAdRunSummary {
         runId = if ($Report.PSObject.Properties.Name -contains 'runId') { $Report.runId } else { $null }
         path = $Path
         artifactType = if ($Report.PSObject.Properties.Name -contains 'artifactType' -and -not [string]::IsNullOrWhiteSpace("$($Report.artifactType)")) { $Report.artifactType } else { 'SyncReport' }
+        workerScope = if ($Report.PSObject.Properties.Name -contains 'workerScope') { $Report.workerScope } else { $null }
         configPath = if ($Report.PSObject.Properties.Name -contains 'configPath') { $Report.configPath } else { $null }
         mappingConfigPath = if ($Report.PSObject.Properties.Name -contains 'mappingConfigPath') { $Report.mappingConfigPath } else { $null }
         mode = if ($Report.PSObject.Properties.Name -contains 'mode') { $Report.mode } else { $null }
@@ -624,6 +626,8 @@ function New-SfAdMonitorUiState {
         filterText = ''
         autoRefreshEnabled = $false
         preferredMode = $null
+        pendingAction = $null
+        pendingWorkerId = $null
         statusMessage = 'Ready. Keys: q quit, r refresh, t toggle auto-refresh, tab focus, arrows or j/k select run, [ ] bucket, left/right or h/l select item, / filter, c clear filter, p preflight, d delta dry-run, s delta sync, f full dry-run, a full sync, w worker preview, v review, z fresh reset, o open path, y copy path, x export bucket.'
         commandOutput = @()
     }
@@ -926,6 +930,50 @@ function Test-SfAdMonitorSelectedRunIsReview {
     $mode = if ($selectedRun -and $selectedRun.PSObject.Properties.Name -contains 'mode') { "$($selectedRun.mode)" } else { '' }
     $artifactType = if ($selectedRun -and $selectedRun.PSObject.Properties.Name -contains 'artifactType') { "$($selectedRun.artifactType)" } else { '' }
     return $mode -eq 'Review' -or $artifactType -in @('FirstSyncReview', 'WorkerPreview')
+}
+
+function Test-SfAdMonitorSelectedRunIsWorkerPreview {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $selectedRun = Get-SfAdMonitorSelectedRun -Status $Status -UiState $UiState
+    if (-not $selectedRun) {
+        return $false
+    }
+
+    if (-not ($selectedRun.PSObject.Properties.Name -contains 'artifactType')) {
+        return $false
+    }
+
+    return "$($selectedRun.artifactType)" -eq 'WorkerPreview'
+}
+
+function Get-SfAdMonitorSelectedRunWorkerId {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [pscustomobject]$UiState
+    )
+
+    $selectedRun = Get-SfAdMonitorSelectedRun -Status $Status -UiState $UiState
+    if (
+        $selectedRun -and
+        $selectedRun.PSObject.Properties.Name -contains 'workerScope' -and
+        $selectedRun.workerScope -and
+        $selectedRun.workerScope.PSObject.Properties.Name -contains 'workerId' -and
+        -not [string]::IsNullOrWhiteSpace("$($selectedRun.workerScope.workerId)")
+    ) {
+        return "$($selectedRun.workerScope.workerId)"
+    }
+
+    return $null
 }
 
 function Get-SfAdMonitorFailureGroups {
@@ -1279,6 +1327,8 @@ function Format-SfAdMonitorDashboardView {
     $selectedRunGuardrailFailures = if ($selectedRun.PSObject.Properties.Name -contains 'guardrailFailures') { $selectedRun.guardrailFailures } else { 0 }
     $summaryTitle = if ($selectedRun.PSObject.Properties.Name -contains 'artifactType' -and "$($selectedRun.artifactType)" -eq 'WorkerPreview') {
         '▓ Worker Preview Summary'
+    } elseif ($selectedRun.PSObject.Properties.Name -contains 'artifactType' -and "$($selectedRun.artifactType)" -eq 'WorkerSync') {
+        '▓ Single Worker Sync Summary'
     } elseif ($isReviewRun) {
         '▓ First Sync Review Summary'
     } else {
@@ -1289,6 +1339,9 @@ function Format-SfAdMonitorDashboardView {
     $lines.Add("Totals: C=$selectedRunCreates U=$selectedRunUpdates D=$selectedRunDisables X=$selectedRunDeletions Q=$selectedRunQuarantined F=$selectedRunConflicts GF=$selectedRunGuardrailFailures")
     if ($isReviewRun -and $selectedRun.reviewSummary) {
         $lines.Add("Review: existing=$($selectedRun.reviewSummary.existingUsersMatched) changed=$($selectedRun.reviewSummary.existingUsersWithAttributeChanges) aligned=$($selectedRun.reviewSummary.existingUsersWithoutAttributeChanges) creates=$($selectedRun.reviewSummary.proposedCreates) offboarding=$($selectedRun.reviewSummary.proposedOffboarding)")
+    }
+    if ($selectedRun.PSObject.Properties.Name -contains 'workerScope' -and $selectedRun.workerScope -and $selectedRun.workerScope.PSObject.Properties.Name -contains 'workerId') {
+        $lines.Add("Worker scope: $($selectedRun.workerScope.workerId)")
     }
     if ($comparisonRun -and $runDelta) {
         $lines.Add("Compared to older run $($comparisonRun.runId): ΔC=$($runDelta.creates) ΔU=$($runDelta.updates) ΔD=$($runDelta.disables) ΔX=$($runDelta.deletions) ΔQ=$($runDelta.quarantined) ΔF=$($runDelta.conflicts) ΔGF=$($runDelta.guardrailFailures)")
@@ -1379,12 +1432,29 @@ function Format-SfAdMonitorDashboardView {
         }
     }
 
+    if ($UiState.pendingAction -eq 'ApplyWorkerSync') {
+        $lines.Add($rule)
+        $lines.Add('▓ Worker Review Actions')
+        $lines.Add("Selected worker: $($UiState.pendingWorkerId)")
+        $lines.Add('Press a to write the reviewed changes to AD.')
+        $lines.Add('Press o to open the review report instead.')
+        $lines.Add('Press Esc to cancel and return to the review screen.')
+    } elseif (Test-SfAdMonitorSelectedRunIsWorkerPreview -Status $Status -UiState $UiState) {
+        $workerPreviewWorkerId = Get-SfAdMonitorSelectedRunWorkerId -Status $Status -UiState $UiState
+        if (-not [string]::IsNullOrWhiteSpace($workerPreviewWorkerId)) {
+            $lines.Add($rule)
+            $lines.Add('▓ Worker Review Actions')
+            $lines.Add("Single-worker review ready for $workerPreviewWorkerId.")
+            $lines.Add('Press g to choose whether to apply this worker to AD or open the review report.')
+        }
+    }
+
     $lines.Add($midBorder)
     $lines.Add("║ Status: $($UiState.statusMessage)")
     $lines.Add('║ Keys: q quit, r refresh, t auto-refresh, tab focus, j/k run, [ ] bucket, h/l item, / filter, c clear, enter inspect')
-    $lines.Add('║ Runs: p preflight, d delta dry-run, s delta sync, f full dry-run, a full sync, w worker preview, v review, z fresh reset, o open report, y copy path, x export bucket')
+    $lines.Add('║ Runs: p preflight, d delta dry-run, s delta sync, f full dry-run, a full sync, w worker preview, v review, g worker apply, z fresh reset, o open report, y copy path, x export bucket')
     $lines.Add($bottomBorder)
     return $lines
 }
 
-Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems, Get-SfAdMonitorSelectedBucketItem, Get-SfAdMonitorSelectedBucketOperation, Get-SfAdMonitorFailureGroups, Get-SfAdMonitorSelectedWorkerState, Get-SfAdMonitorCurrentRunDiagnostics, Get-SfAdMonitorOperationDiffLines, Format-SfAdMonitorSelectedObjectLines, Get-SfAdReportDirectories, Test-SfAdMonitorSelectedRunIsReview
+Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems, Get-SfAdMonitorSelectedBucketItem, Get-SfAdMonitorSelectedBucketOperation, Get-SfAdMonitorFailureGroups, Get-SfAdMonitorSelectedWorkerState, Get-SfAdMonitorCurrentRunDiagnostics, Get-SfAdMonitorOperationDiffLines, Format-SfAdMonitorSelectedObjectLines, Get-SfAdReportDirectories, Test-SfAdMonitorSelectedRunIsReview, Test-SfAdMonitorSelectedRunIsWorkerPreview, Get-SfAdMonitorSelectedRunWorkerId

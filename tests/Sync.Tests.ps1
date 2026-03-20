@@ -1262,9 +1262,49 @@ Describe 'Invoke-SfAdSyncRun' {
         }
     }
 
-    It 'rejects WorkerId outside review mode' {
+    It 'allows WorkerId for scoped full sync runs' {
         InModuleScope Sync {
-            { Invoke-SfAdSyncRun -ConfigPath $global:SyncTestConfigPath -MappingConfigPath $global:SyncTestMappingConfigPath -Mode Delta -WorkerId '7001' } | Should -Throw '-WorkerId is only supported with -Mode Review.'
+            Mock Get-SfAdSyncConfig { $global:SyncTestBaseConfig }
+            Mock Get-SfAdSyncMappingConfig { [pscustomobject]@{ mappings = @() } }
+            Mock Get-SfAdSyncState { [pscustomobject]@{ checkpoint = $null; workers = [pscustomobject]@{} } }
+            Mock Get-SfWorkerById {
+                [pscustomobject]@{
+                    personIdExternal = '7001'
+                    status = 'active'
+                    startDate = (Get-Date).ToString('o')
+                }
+            }
+            Mock Get-SfWorkers { throw 'Get-SfWorkers should not run for scoped full sync.' }
+            Mock Get-SfAdTargetUser { $null }
+            Mock Get-SfAdUserBySamAccountName { $null }
+            Mock Get-SfAdUserByUserPrincipalName { $null }
+            Mock Get-SfAdWorkerState { $null }
+            Mock Get-SfAdAttributeChanges { [pscustomobject]@{ Changes = @{}; MissingRequired = @() } }
+            Mock New-SfAdUser { [pscustomobject]@{ ObjectGuid = [guid]'11111111-1111-1111-1111-111111111111'; DistinguishedName = 'CN=Jamie Doe,OU=Employees,DC=example,DC=com'; SamAccountName = '7001'; Enabled = $false } }
+            Mock Enable-SfAdUser {}
+            Mock Add-SfAdUserToConfiguredGroups { @() }
+            Mock Set-SfAdWorkerState {}
+            Mock Save-SfAdSyncState {}
+            Mock Save-SfAdSyncReport {
+                param($Report, $Directory, $Mode)
+                $global:CapturedReport = $Report
+                return (Join-Path $Directory "sf-ad-sync-$Mode.json")
+            }
+            Mock Write-SfAdRuntimeStatusSnapshot {}
+            Mock Ensure-ActiveDirectoryModule {}
+
+            Invoke-SfAdSyncRun -ConfigPath $global:SyncTestConfigPath -MappingConfigPath $global:SyncTestMappingConfigPath -Mode Full -WorkerId '7001' | Out-Null
+
+            $global:CapturedReport.artifactType | Should -Be 'WorkerSync'
+            $global:CapturedReport.workerScope.workerId | Should -Be '7001'
+            Assert-MockCalled Get-SfWorkerById -Times 1 -Exactly -ParameterFilter { $WorkerId -eq '7001' }
+            Assert-MockCalled Get-SfWorkers -Times 0 -Exactly
+        }
+    }
+
+    It 'still rejects WorkerId outside full or review mode' {
+        InModuleScope Sync {
+            { Invoke-SfAdSyncRun -ConfigPath $global:SyncTestConfigPath -MappingConfigPath $global:SyncTestMappingConfigPath -Mode Delta -WorkerId '7001' } | Should -Throw '-WorkerId is only supported with -Mode Full or -Mode Review.'
         }
     }
 

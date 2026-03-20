@@ -383,6 +383,53 @@ param(
         ((Get-Content -Path $result.metadataPath -Raw).Trim()) | Should -Be '<edmx:Edmx />'
     }
 
+    It 'runs the worker sync entry script and returns the scoped run in json mode' {
+        $configPath = Join-Path $TestDrive 'worker-sync-config.json'
+        $mappingPath = Join-Path $TestDrive 'worker-sync-mapping.json'
+        $invokeStubPath = Join-Path $TestDrive 'invoke-worker-sync-stub.ps1'
+        $reportPath = Join-Path $TestDrive 'sf-ad-sync-Full.json'
+
+        (New-StatusConfigContent -StatePath (Join-Path $TestDrive 'state.json') -ReportDirectory (Join-Path $TestDrive 'reports')) | Set-Content -Path $configPath
+        '{}' | Set-Content -Path $mappingPath
+        @"
+{
+  "runId": "worker-sync-123",
+  "mode": "Full",
+  "status": "Succeeded",
+  "artifactType": "WorkerSync",
+  "workerScope": {
+    "identityField": "personIdExternal",
+    "workerId": "1001"
+  }
+}
+"@ | Set-Content -Path $reportPath
+        @"
+param(
+    [string]`$ConfigPath,
+    [string]`$MappingConfigPath,
+    [string]`$Mode,
+    [string]`$WorkerId
+)
+
+'$reportPath'
+"@ | Set-Content -Path $invokeStubPath
+
+        Mock Join-Path {
+            if ($ChildPath -eq 'src/Invoke-SfAdSync.ps1') {
+                return $invokeStubPath
+            }
+
+            return [System.IO.Path]::Combine($Path, $ChildPath)
+        }
+
+        $result = & "$PSScriptRoot/../scripts/Invoke-SfAdWorkerSync.ps1" -ConfigPath $configPath -MappingConfigPath $mappingPath -WorkerId '1001' -AsJson | ConvertFrom-Json -Depth 20
+
+        $result.status | Should -Be 'Succeeded'
+        $result.mode | Should -Be 'Full'
+        $result.artifactType | Should -Be 'WorkerSync'
+        $result.workerScope.workerId | Should -Be '1001'
+    }
+
     It 'requires three confirmations before deleting managed OU users and resetting sync state' {
         $configPath = Join-Path $TestDrive 'fresh-reset-config.json'
         $statePath = Join-Path $TestDrive 'fresh-reset-state.json'

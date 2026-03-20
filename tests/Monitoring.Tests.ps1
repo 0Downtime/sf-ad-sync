@@ -704,6 +704,9 @@ Describe 'Monitoring module' {
                     status = 'Succeeded'
                     mode = 'Review'
                     artifactType = 'WorkerPreview'
+                    workerScope = [pscustomobject]@{
+                        workerId = '1001'
+                    }
                     dryRun = $true
                     startedAt = '2026-03-12T21:30:00'
                     durationSeconds = 300
@@ -738,7 +741,91 @@ Describe 'Monitoring module' {
         ($lines -join "`n") | Should -Match 'f full dry-run'
         ($lines -join "`n") | Should -Match 'a full sync'
         ($lines -join "`n") | Should -Match 'w worker preview'
+        ($lines -join "`n") | Should -Match 'Single-worker review ready for'
+        ($lines -join "`n") | Should -Match 'g to choose whether to apply this worker'
         ($lines -join "`n") | Should -Match 'z fresh reset'
+    }
+
+    It 'renders a modal action prompt for selected worker preview runs' {
+        $status = [pscustomobject]@{
+            paths = [pscustomobject]@{
+                configPath = 'config.json'
+                statePath = 'state.json'
+                reportDirectory = 'reports'
+                reviewReportDirectory = 'reviews'
+            }
+            currentRun = [pscustomobject]@{
+                status = 'Idle'
+                stage = 'Completed'
+                mode = $null
+                dryRun = $false
+                startedAt = $null
+                lastUpdatedAt = '2026-03-12T21:41:00'
+                processedWorkers = 0
+                totalWorkers = 0
+                currentWorkerId = $null
+                lastAction = 'No active sync run.'
+                errorMessage = $null
+            }
+            latestRun = [pscustomobject]@{
+                status = 'Succeeded'
+                mode = 'Review'
+                artifactType = 'WorkerPreview'
+                workerScope = [pscustomobject]@{
+                    workerId = '1001'
+                }
+            }
+            summary = [pscustomobject]@{
+                lastCheckpoint = '2026-03-12T21:00:00'
+                totalTrackedWorkers = 10
+                suppressedWorkers = 1
+                pendingDeletionWorkers = 0
+            }
+            trackedWorkers = @()
+            context = [pscustomobject]@{
+                identityField = 'personIdExternal'
+                identityAttribute = 'employeeID'
+            }
+            recentRuns = @(
+                [pscustomobject]@{
+                    runId = 'preview-123'
+                    path = 'report.json'
+                    configPath = 'config.json'
+                    mappingConfigPath = 'mapping.json'
+                    status = 'Succeeded'
+                    mode = 'Review'
+                    artifactType = 'WorkerPreview'
+                    dryRun = $true
+                    startedAt = '2026-03-12T21:30:00'
+                    durationSeconds = 300
+                    creates = 0
+                    updates = 1
+                    disables = 0
+                    deletions = 0
+                    conflicts = 0
+                    guardrailFailures = 0
+                    reviewSummary = [pscustomobject]@{
+                        existingUsersMatched = 1
+                        existingUsersWithAttributeChanges = 1
+                        existingUsersWithoutAttributeChanges = 0
+                        proposedCreates = 0
+                        proposedOffboarding = 0
+                    }
+                    workerScope = [pscustomobject]@{
+                        workerId = '1001'
+                    }
+                }
+            )
+        }
+        $uiState = New-SfAdMonitorUiState
+        $uiState.pendingAction = 'ApplyWorkerSync'
+        $uiState.pendingWorkerId = '1001'
+
+        $lines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
+
+        ($lines -join "`n") | Should -Match 'Worker Review Actions'
+        ($lines -join "`n") | Should -Match 'Press a to write the reviewed changes to AD'
+        ($lines -join "`n") | Should -Match 'Press o to open the review report instead'
     }
 
     It 'uses the selected run rather than latest run in the summary panel' {

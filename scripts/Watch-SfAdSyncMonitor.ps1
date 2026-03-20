@@ -232,7 +232,7 @@ function Invoke-SfAdMonitorShortcut {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Preflight','DeltaDryRun','DeltaRun','FullDryRun','FullRun','ReviewRun','WorkerPreview','FreshSyncReset','OpenReport','CopyReportPath')]
+        [ValidateSet('Preflight','DeltaDryRun','DeltaRun','FullDryRun','FullRun','ReviewRun','WorkerPreview','ApplyReviewedWorker','FreshSyncReset','OpenReport','CopyReportPath')]
         [string]$Action,
         [Parameter(Mandatory)]
         [pscustomobject]$Status,
@@ -487,6 +487,54 @@ function Invoke-SfAdMonitorShortcut {
                 $UiState.commandOutput = @($_.Exception.Message)
             }
         }
+        'ApplyReviewedWorker' {
+            if (-not $context.mappingConfigPath) {
+                $UiState.statusMessage = 'Worker apply unavailable: no mapping config path was provided and none could be inferred from recent runs.'
+                $UiState.commandOutput = @()
+                return
+            }
+
+            $selectedRun = $context.selectedRun
+            $workerId = if (
+                $selectedRun -and
+                $selectedRun.PSObject.Properties.Name -contains 'workerScope' -and
+                $selectedRun.workerScope -and
+                $selectedRun.workerScope.PSObject.Properties.Name -contains 'workerId'
+            ) { "$($selectedRun.workerScope.workerId)" } else { $null }
+            if ([string]::IsNullOrWhiteSpace($workerId)) {
+                $UiState.statusMessage = 'Worker apply unavailable: the selected run is not scoped to one worker.'
+                $UiState.commandOutput = @()
+                return
+            }
+
+            if (-not (Confirm-SfAdMonitorWriteAction -Label "Apply worker sync for $workerId" -WriteTarget 'AD and sync state')) {
+                $UiState.statusMessage = 'Worker apply cancelled.'
+                $UiState.commandOutput = @()
+                return
+            }
+
+            $argumentList = @(
+                '-NoLogo'
+                '-NoProfile'
+                '-File'
+                (Join-Path $projectRoot 'scripts/Invoke-SfAdWorkerSync.ps1')
+                '-ConfigPath'
+                $context.configPath
+                '-MappingConfigPath'
+                $context.mappingConfigPath
+                '-WorkerId'
+                $workerId
+            )
+
+            try {
+                Start-Process -FilePath 'pwsh' -ArgumentList $argumentList | Out-Null
+                $UiState.statusMessage = "Started single-worker sync for $workerId in a new PowerShell process."
+                $UiState.commandOutput = @("Config=$($context.configPath)", "Mapping=$($context.mappingConfigPath)", "WorkerId=$workerId")
+            } catch {
+                $UiState.statusMessage = 'Failed to start single-worker sync.'
+                $UiState.commandOutput = @($_.Exception.Message)
+            }
+        }
         'FreshSyncReset' {
             if (-not (Confirm-SfAdMonitorWriteAction -Label 'Fresh sync reset' -WriteTarget 'managed AD user objects and local sync state')) {
                 $UiState.statusMessage = 'Fresh sync reset cancelled.'
@@ -578,6 +626,35 @@ do {
     while (-not $quitRequested -and -not $refreshRequested) {
         if ([Console]::KeyAvailable) {
             $key = [Console]::ReadKey($true)
+            if ($uiState.pendingAction -eq 'ApplyWorkerSync') {
+                switch ($key.Key) {
+                    'A' {
+                        if ($lastStatus) {
+                            Invoke-SfAdMonitorShortcut -Action ApplyReviewedWorker -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
+                        }
+                        $uiState.pendingAction = $null
+                        $uiState.pendingWorkerId = $null
+                        $refreshRequested = $true
+                        continue
+                    }
+                    'O' {
+                        if ($lastStatus) {
+                            Invoke-SfAdMonitorShortcut -Action OpenReport -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
+                        }
+                        $uiState.pendingAction = $null
+                        $uiState.pendingWorkerId = $null
+                        $refreshRequested = $true
+                        continue
+                    }
+                    'Escape' {
+                        $uiState.pendingAction = $null
+                        $uiState.pendingWorkerId = $null
+                        $uiState.statusMessage = 'Worker action prompt cancelled.'
+                        $refreshRequested = $true
+                        continue
+                    }
+                }
+            }
             switch ($key.Key) {
                 'Q' {
                     $quitRequested = $true
@@ -765,6 +842,22 @@ do {
                         'v' {
                             if ($lastStatus) {
                                 Invoke-SfAdMonitorShortcut -Action ReviewRun -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
+                            }
+                            $refreshRequested = $true
+                            break
+                        }
+                        'g' {
+                            if ($lastStatus -and (Test-SfAdMonitorSelectedRunIsWorkerPreview -Status $lastStatus -UiState $uiState)) {
+                                $workerId = Get-SfAdMonitorSelectedRunWorkerId -Status $lastStatus -UiState $uiState
+                                if (-not [string]::IsNullOrWhiteSpace($workerId)) {
+                                    $uiState.pendingAction = 'ApplyWorkerSync'
+                                    $uiState.pendingWorkerId = $workerId
+                                    $uiState.statusMessage = "Choose an action for reviewed worker $workerId."
+                                } else {
+                                    $uiState.statusMessage = 'Worker apply unavailable: the selected review is missing worker scope.'
+                                }
+                            } else {
+                                $uiState.statusMessage = 'Worker apply is only available on a selected single-worker review run.'
                             }
                             $refreshRequested = $true
                             break

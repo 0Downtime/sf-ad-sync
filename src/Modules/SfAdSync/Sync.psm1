@@ -246,6 +246,10 @@ function Get-SfAdArtifactType {
         return 'FirstSyncReview'
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($WorkerId)) {
+        return 'WorkerSync'
+    }
+
     return 'SyncReport'
 }
 
@@ -640,8 +644,8 @@ function Invoke-SfAdSyncRun {
         [string]$WorkerId
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($WorkerId) -and -not (Test-SfAdReviewMode -Mode $Mode)) {
-        throw '-WorkerId is only supported with -Mode Review.'
+    if (-not [string]::IsNullOrWhiteSpace($WorkerId) -and $Mode -notin @('Full', 'Review')) {
+        throw '-WorkerId is only supported with -Mode Full or -Mode Review.'
     }
 
     $resolvedConfigPath = (Resolve-Path -Path $ConfigPath).Path
