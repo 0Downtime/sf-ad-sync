@@ -918,9 +918,18 @@ Describe 'Monitoring module' {
                 status = 'Succeeded'
                 mode = 'Review'
                 artifactType = 'WorkerPreview'
+                dryRun = $true
+                durationSeconds = 300
                 workerScope = [pscustomobject]@{
                     workerId = '1001'
                 }
+                creates = 0
+                updates = 1
+                disables = 0
+                deletions = 0
+                quarantined = 0
+                conflicts = 0
+                guardrailFailures = 0
             }
             summary = [pscustomobject]@{
                 lastCheckpoint = '2026-03-12T21:00:00'
@@ -972,7 +981,126 @@ Describe 'Monitoring module' {
 
         ($lines -join "`n") | Should -Match 'Worker Review Actions'
         ($lines -join "`n") | Should -Match 'Press a to write the reviewed changes to AD'
-        ($lines -join "`n") | Should -Match 'Press o to open the review report instead'
+        ($lines -join "`n") | Should -Match 'Press o to choose a related worker report'
+    }
+
+    It 'lists related worker preview and sync reports in the worker report picker' {
+        $status = [pscustomobject]@{
+            paths = [pscustomobject]@{
+                configPath = 'config.json'
+                statePath = 'state.json'
+                reportDirectory = 'reports'
+                reviewReportDirectory = 'reviews'
+            }
+            currentRun = [pscustomobject]@{
+                status = 'Idle'
+                stage = 'Completed'
+                mode = $null
+                dryRun = $false
+                startedAt = $null
+                lastUpdatedAt = '2026-03-12T21:41:00'
+                processedWorkers = 0
+                totalWorkers = 0
+                currentWorkerId = $null
+                lastAction = 'No active sync run.'
+                errorMessage = $null
+            }
+            latestRun = [pscustomobject]@{
+                status = 'Succeeded'
+                mode = 'Review'
+                artifactType = 'WorkerPreview'
+                workerScope = [pscustomobject]@{
+                    workerId = '1001'
+                }
+            }
+            summary = [pscustomobject]@{
+                lastCheckpoint = '2026-03-12T21:00:00'
+                totalTrackedWorkers = 10
+                suppressedWorkers = 1
+                pendingDeletionWorkers = 0
+            }
+            trackedWorkers = @()
+            context = [pscustomobject]@{
+                identityField = 'personIdExternal'
+                identityAttribute = 'employeeID'
+            }
+            recentRuns = @(
+                [pscustomobject]@{
+                    runId = 'preview-123'
+                    path = 'preview-report.json'
+                    status = 'Succeeded'
+                    mode = 'Review'
+                    artifactType = 'WorkerPreview'
+                    dryRun = $true
+                    durationSeconds = 300
+                    workerScope = [pscustomobject]@{
+                        workerId = '1001'
+                    }
+                    startedAt = '2026-03-12T21:30:00'
+                    creates = 0
+                    updates = 1
+                    disables = 0
+                    deletions = 0
+                    quarantined = 0
+                    conflicts = 0
+                    guardrailFailures = 0
+                }
+                [pscustomobject]@{
+                    runId = 'sync-123'
+                    path = 'sync-report.json'
+                    status = 'Succeeded'
+                    mode = 'Full'
+                    artifactType = 'WorkerSync'
+                    dryRun = $false
+                    durationSeconds = 120
+                    workerScope = [pscustomobject]@{
+                        workerId = '1001'
+                    }
+                    startedAt = '2026-03-12T21:45:00'
+                    creates = 0
+                    updates = 1
+                    disables = 0
+                    deletions = 0
+                    quarantined = 0
+                    conflicts = 0
+                    guardrailFailures = 0
+                }
+                [pscustomobject]@{
+                    runId = 'preview-999'
+                    path = 'other-worker-preview.json'
+                    status = 'Succeeded'
+                    mode = 'Review'
+                    artifactType = 'WorkerPreview'
+                    dryRun = $true
+                    durationSeconds = 300
+                    workerScope = [pscustomobject]@{
+                        workerId = '9999'
+                    }
+                    startedAt = '2026-03-12T20:30:00'
+                    creates = 0
+                    updates = 0
+                    disables = 0
+                    deletions = 0
+                    quarantined = 0
+                    conflicts = 0
+                    guardrailFailures = 0
+                }
+            )
+        }
+        $uiState = New-SfAdMonitorUiState
+        $uiState.pendingAction = 'WorkerReportPicker'
+        $uiState.pendingWorkerId = '1001'
+
+        $relatedRuns = @(Get-SfAdMonitorWorkerRelatedRuns -Status $status -WorkerId '1001')
+        $relatedRuns.Count | Should -Be 2
+        $relatedRuns[0].Run.artifactType | Should -Be 'WorkerPreview'
+        $relatedRuns[1].Run.artifactType | Should -Be 'WorkerSync'
+
+        $lines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
+        ($lines -join "`n") | Should -Match 'Worker Report Picker'
+        ($lines -join "`n") | Should -Match 'WorkerPreview Succeeded'
+        ($lines -join "`n") | Should -Match 'WorkerSync Succeeded'
+        ($lines -join "`n") | Should -Match 'Press Enter or o to open the selected report'
     }
 
     It 'uses the selected run rather than latest run in the summary panel' {

@@ -625,6 +625,7 @@ function New-SfAdMonitorUiState {
         selectedItemIndex = 0
         reportCategoryIndex = 0
         reportEntryIndex = 0
+        pendingReportIndex = 0
         focus = 'History'
         filterText = ''
         autoRefreshEnabled = $false
@@ -977,6 +978,60 @@ function Get-SfAdMonitorSelectedRunWorkerId {
     }
 
     return $null
+}
+
+function Get-SfAdMonitorWorkerRelatedRuns {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Status,
+        [Parameter(Mandatory)]
+        [string]$WorkerId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($WorkerId)) {
+        return @()
+    }
+
+    $results = [System.Collections.Generic.List[object]]::new()
+    $runs = @($Status.recentRuns)
+    for ($index = 0; $index -lt $runs.Count; $index += 1) {
+        $run = $runs[$index]
+        if (
+            -not $run -or
+            -not ($run.PSObject.Properties.Name -contains 'workerScope') -or
+            -not $run.workerScope -or
+            -not ($run.workerScope.PSObject.Properties.Name -contains 'workerId') -or
+            [string]::IsNullOrWhiteSpace("$($run.workerScope.workerId)") -or
+            "$($run.workerScope.workerId)" -ne $WorkerId
+        ) {
+            continue
+        }
+
+        $artifactType = if ($run.PSObject.Properties.Name -contains 'artifactType' -and -not [string]::IsNullOrWhiteSpace("$($run.artifactType)")) {
+            "$($run.artifactType)"
+        } else {
+            'Run'
+        }
+        $statusText = if ($run.PSObject.Properties.Name -contains 'status' -and -not [string]::IsNullOrWhiteSpace("$($run.status)")) {
+            "$($run.status)"
+        } else {
+            '-'
+        }
+        $startedAtText = if ($run.PSObject.Properties.Name -contains 'startedAt' -and -not [string]::IsNullOrWhiteSpace("$($run.startedAt)")) {
+            "$($run.startedAt)"
+        } else {
+            '-'
+        }
+
+        $results.Add([pscustomobject]@{
+                RunIndex = $index
+                Run = $run
+                Label = ("{0} {1} {2}" -f $artifactType, $statusText, $startedAtText)
+            })
+    }
+
+    return @($results)
 }
 
 function Get-SfAdMonitorFailureGroups {
@@ -1673,7 +1728,7 @@ function Format-SfAdMonitorDashboardView {
     $lines.Add($summaryTitle)
     $lines.Add("Status: $($selectedRun.status)    Mode: $($selectedRun.mode)    DryRun: $($selectedRun.dryRun)    Started: $($selectedRun.startedAt)    Dur(s): $selectedRunDuration")
     $lines.Add("Totals: C=$selectedRunCreates U=$selectedRunUpdates D=$selectedRunDisables X=$selectedRunDeletions Q=$selectedRunQuarantined F=$selectedRunConflicts GF=$selectedRunGuardrailFailures")
-    if ($isReviewRun -and $selectedRun.reviewSummary) {
+    if ($isReviewRun -and $selectedRun.PSObject.Properties.Name -contains 'reviewSummary' -and $selectedRun.reviewSummary) {
         $lines.Add("Review: existing=$($selectedRun.reviewSummary.existingUsersMatched) changed=$($selectedRun.reviewSummary.existingUsersWithAttributeChanges) aligned=$($selectedRun.reviewSummary.existingUsersWithoutAttributeChanges) creates=$($selectedRun.reviewSummary.proposedCreates) offboarding=$($selectedRun.reviewSummary.proposedOffboarding)")
     }
     if ($selectedRun.PSObject.Properties.Name -contains 'workerScope' -and $selectedRun.workerScope -and $selectedRun.workerScope.PSObject.Properties.Name -contains 'workerId') {
@@ -1773,8 +1828,27 @@ function Format-SfAdMonitorDashboardView {
         $lines.Add('▓ Worker Review Actions')
         $lines.Add("Selected worker: $($UiState.pendingWorkerId)")
         $lines.Add('Press a to write the reviewed changes to AD.')
-        $lines.Add('Press o to open the review report instead.')
+        $lines.Add('Press o to choose a related worker report.')
         $lines.Add('Press Esc to cancel and return to the review screen.')
+    } elseif ($UiState.pendingAction -eq 'WorkerReportPicker') {
+        $lines.Add($rule)
+        $lines.Add('▓ Worker Report Picker')
+        $lines.Add("Selected worker: $($UiState.pendingWorkerId)")
+        $relatedRuns = @(Get-SfAdMonitorWorkerRelatedRuns -Status $Status -WorkerId $UiState.pendingWorkerId)
+        if ($relatedRuns.Count -eq 0) {
+            $lines.Add('No related one-worker reports were found.')
+        } else {
+            for ($i = 0; $i -lt [math]::Min($relatedRuns.Count, 6); $i += 1) {
+                $prefix = if ($i -eq [math]::Min([math]::Max([int]$UiState.pendingReportIndex, 0), $relatedRuns.Count - 1)) { ' > ' } else { '   ' }
+                $lines.Add("$prefix$($relatedRuns[$i].Label)")
+            }
+            if ($relatedRuns.Count -gt 6) {
+                $lines.Add("... $($relatedRuns.Count - 6) more reports")
+            }
+        }
+        $lines.Add('Press Enter or o to open the selected report.')
+        $lines.Add('Press j/k to move through related reports.')
+        $lines.Add('Press Esc to return to worker actions.')
     } elseif (Test-SfAdMonitorSelectedRunIsWorkerPreview -Status $Status -UiState $UiState) {
         $workerPreviewWorkerId = Get-SfAdMonitorSelectedRunWorkerId -Status $Status -UiState $UiState
         if (-not [string]::IsNullOrWhiteSpace($workerPreviewWorkerId)) {
@@ -1793,4 +1867,4 @@ function Format-SfAdMonitorDashboardView {
     return $lines
 }
 
-Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems, Get-SfAdMonitorSelectedBucketItem, Get-SfAdMonitorSelectedBucketOperation, Get-SfAdMonitorFailureGroups, Get-SfAdMonitorSelectedWorkerState, Get-SfAdMonitorCurrentRunDiagnostics, Get-SfAdMonitorOperationDiffLines, Format-SfAdMonitorSelectedObjectLines, Get-SfAdReportDirectories, Test-SfAdMonitorSelectedRunIsReview, Test-SfAdMonitorSelectedRunIsWorkerPreview, Get-SfAdMonitorSelectedRunWorkerId, Get-SfAdMonitorReportExplorerCategoryDefinitions, Get-SfAdMonitorReportExplorerEntries, Get-SfAdMonitorReportExplorerSelection, Get-SfAdMonitorReportExplorerDiffRows, Format-SfAdMonitorReportExplorerView
+Export-ModuleMember -Function Get-SfAdRuntimeStatusPath, New-SfAdIdleRuntimeStatus, New-SfAdRuntimeStatusSnapshot, Save-SfAdRuntimeStatusSnapshot, Write-SfAdRuntimeStatusSnapshot, Get-SfAdRuntimeStatusSnapshot, Get-SfAdRecentRunSummaries, Get-SfAdMonitorStatus, Format-SfAdMonitorView, New-SfAdMonitorUiState, Get-SfAdMonitorBucketDefinitions, Get-SfAdMonitorSelectedRun, Get-SfAdMonitorSelectedRunReport, Get-SfAdMonitorSelectedBucket, Resolve-SfAdMonitorMappingConfigPath, Resolve-SfAdMonitorSelectedReportPath, Get-SfAdMonitorActionContext, Format-SfAdMonitorDashboardView, Get-SfAdMonitorFilteredBucketItems, Get-SfAdMonitorSelectedBucketItem, Get-SfAdMonitorSelectedBucketOperation, Get-SfAdMonitorFailureGroups, Get-SfAdMonitorSelectedWorkerState, Get-SfAdMonitorCurrentRunDiagnostics, Get-SfAdMonitorOperationDiffLines, Format-SfAdMonitorSelectedObjectLines, Get-SfAdReportDirectories, Test-SfAdMonitorSelectedRunIsReview, Test-SfAdMonitorSelectedRunIsWorkerPreview, Get-SfAdMonitorSelectedRunWorkerId, Get-SfAdMonitorWorkerRelatedRuns, Get-SfAdMonitorReportExplorerCategoryDefinitions, Get-SfAdMonitorReportExplorerEntries, Get-SfAdMonitorReportExplorerSelection, Get-SfAdMonitorReportExplorerDiffRows, Format-SfAdMonitorReportExplorerView

@@ -655,10 +655,15 @@ do {
                     }
                     'O' {
                         if ($lastStatus) {
-                            Invoke-SfAdMonitorShortcut -Action OpenReport -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
+                            $relatedRuns = @(Get-SfAdMonitorWorkerRelatedRuns -Status $lastStatus -WorkerId $uiState.pendingWorkerId)
+                            if ($relatedRuns.Count -eq 0) {
+                                $uiState.statusMessage = 'No related worker reports were found.'
+                            } else {
+                                $uiState.pendingAction = 'WorkerReportPicker'
+                                $uiState.pendingReportIndex = 0
+                                $uiState.statusMessage = 'Choose a worker report to open.'
+                            }
                         }
-                        $uiState.pendingAction = $null
-                        $uiState.pendingWorkerId = $null
                         $refreshRequested = $true
                         continue
                     }
@@ -666,6 +671,62 @@ do {
                         $uiState.pendingAction = $null
                         $uiState.pendingWorkerId = $null
                         $uiState.statusMessage = 'Worker action prompt cancelled.'
+                        $refreshRequested = $true
+                        continue
+                    }
+                }
+            }
+            if ($uiState.pendingAction -eq 'WorkerReportPicker') {
+                switch ($key.Key) {
+                    'Enter' {
+                        if ($lastStatus) {
+                            $relatedRuns = @(Get-SfAdMonitorWorkerRelatedRuns -Status $lastStatus -WorkerId $uiState.pendingWorkerId)
+                            if ($relatedRuns.Count -gt 0) {
+                                $selectedIndex = [math]::Min([math]::Max([int]$uiState.pendingReportIndex, 0), $relatedRuns.Count - 1)
+                                $uiState.selectedRunIndex = [int]$relatedRuns[$selectedIndex].RunIndex
+                                $uiState.pendingAction = $null
+                                Invoke-SfAdMonitorShortcut -Action OpenReport -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
+                            } else {
+                                $uiState.statusMessage = 'No related worker reports were found.'
+                            }
+                        }
+                        $refreshRequested = $true
+                        continue
+                    }
+                    'Escape' {
+                        $uiState.pendingAction = 'ApplyWorkerSync'
+                        $uiState.pendingReportIndex = 0
+                        $uiState.statusMessage = 'Returned to worker actions.'
+                        $refreshRequested = $true
+                        continue
+                    }
+                }
+
+                switch ($key.KeyChar) {
+                    'o' {
+                        if ($lastStatus) {
+                            $relatedRuns = @(Get-SfAdMonitorWorkerRelatedRuns -Status $lastStatus -WorkerId $uiState.pendingWorkerId)
+                            if ($relatedRuns.Count -gt 0) {
+                                $selectedIndex = [math]::Min([math]::Max([int]$uiState.pendingReportIndex, 0), $relatedRuns.Count - 1)
+                                $uiState.selectedRunIndex = [int]$relatedRuns[$selectedIndex].RunIndex
+                                $uiState.pendingAction = $null
+                                Invoke-SfAdMonitorShortcut -Action OpenReport -Status $lastStatus -UiState $uiState -ResolvedMappingConfigPath $resolvedMappingConfigPath
+                            } else {
+                                $uiState.statusMessage = 'No related worker reports were found.'
+                            }
+                        }
+                        $refreshRequested = $true
+                        continue
+                    }
+                    'j' {
+                        $uiState.pendingReportIndex = [int]$uiState.pendingReportIndex + 1
+                        $uiState.statusMessage = 'Selected next related worker report.'
+                        $refreshRequested = $true
+                        continue
+                    }
+                    'k' {
+                        $uiState.pendingReportIndex = [math]::Max([int]$uiState.pendingReportIndex - 1, 0)
+                        $uiState.statusMessage = 'Selected previous related worker report.'
                         $refreshRequested = $true
                         continue
                     }
