@@ -10,11 +10,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$moduleRoot = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'src/Modules/SfAdSync'
+ $projectRoot = Split-Path -Path $PSScriptRoot -Parent
+$moduleRoot = Join-Path -Path $projectRoot -ChildPath 'src/Modules/SfAdSync'
 Import-Module (Join-Path $moduleRoot 'Config.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $moduleRoot 'SuccessFactors.psm1') -Force -DisableNameChecking
 
-$config = Get-SfAdSyncConfig -Path $ConfigPath
+$resolvedConfigPath = (Resolve-Path -Path $ConfigPath).Path
+$config = Get-SfAdSyncConfig -Path $resolvedConfigPath
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $defaultOutputRoot = if (
@@ -25,7 +27,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     ) {
         "$($config.reporting.outputDirectory)"
     } else {
-        Join-Path -Path (Split-Path -Path $ConfigPath -Parent) -ChildPath 'reports'
+        Join-Path -Path (Split-Path -Path $resolvedConfigPath -Parent) -ChildPath 'reports'
     }
 
     $OutputDirectory = Join-Path -Path $defaultOutputRoot -ChildPath 'schema'
@@ -45,7 +47,7 @@ $export.metadataXml | Set-Content -Path $metadataPath -Encoding UTF8
 $summary = [pscustomobject]@{
     artifactType     = $export.artifactType
     exportedAt       = $export.exportedAt
-    configPath       = [System.IO.Path]::GetFullPath($ConfigPath)
+    configPath       = $resolvedConfigPath
     outputDirectory  = [System.IO.Path]::GetFullPath($OutputDirectory)
     metadataUri      = $export.metadataUri
     metadataPath     = [System.IO.Path]::GetFullPath($metadataPath)
