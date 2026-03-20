@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)]
     [string]$ConfigPath,
-    [string]$LogPath
+    [string]$LogPath,
+    [string]$PreviewReportPath
 )
 
 Set-StrictMode -Version Latest
@@ -12,6 +13,7 @@ $moduleRoot = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPat
 Import-Module (Join-Path $moduleRoot 'Config.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $moduleRoot 'State.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $moduleRoot 'ActiveDirectorySync.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $moduleRoot 'Reporting.psm1') -Force -DisableNameChecking
 
 function Read-SfAdResetConfirmation {
     param(
@@ -60,6 +62,41 @@ function Get-SfAdFreshResetLogPath {
     return Join-Path -Path $directory -ChildPath "sf-ad-sync-fresh-reset-$timestamp.log"
 }
 
+function Get-SfAdFreshResetPreviewReportPath {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Config,
+        [string]$RequestedPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $requestedDirectory = Split-Path -Path $RequestedPath -Parent
+        if (-not [string]::IsNullOrWhiteSpace($requestedDirectory) -and -not (Test-Path -Path $requestedDirectory -PathType Container)) {
+            New-Item -Path $requestedDirectory -ItemType Directory -Force | Out-Null
+        }
+
+        return $RequestedPath
+    }
+
+    $directory = if (
+        $Config.PSObject.Properties.Name -contains 'reporting' -and
+        $Config.reporting -and
+        $Config.reporting.PSObject.Properties.Name -contains 'outputDirectory' -and
+        -not [string]::IsNullOrWhiteSpace("$($Config.reporting.outputDirectory)")
+    ) {
+        "$($Config.reporting.outputDirectory)"
+    } else {
+        [System.IO.Path]::GetTempPath()
+    }
+
+    if (-not (Test-Path -Path $directory -PathType Container)) {
+        New-Item -Path $directory -ItemType Directory -Force | Out-Null
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    return Join-Path -Path $directory -ChildPath "sf-ad-sync-ResetPreview-$timestamp.json"
+}
+
 function Write-SfAdFreshResetLog {
     param(
         [Parameter(Mandatory)]
@@ -94,15 +131,100 @@ function Get-SfAdFreshResetUserLabel {
     return "samAccountName=$samAccountName dn=$distinguishedName"
 }
 
+function Get-SfAdFreshResetParentOu {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$User
+    )
+
+    if (-not ($User.PSObject.Properties.Name -contains 'DistinguishedName') -or [string]::IsNullOrWhiteSpace("$($User.DistinguishedName)")) {
+        return $null
+    }
+
+    $parts = "$($User.DistinguishedName)" -split ',', 2
+    if ($parts.Count -lt 2) {
+        return $null
+    }
+
+    return $parts[1]
+}
+
+function New-SfAdFreshResetPreviewReport {
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Config,
+        [Parameter(Mandatory)]
+        [string]$ResolvedConfigPath,
+        [Parameter(Mandatory)]
+        [object[]]$Users
+    )
+
+    $report = New-SfAdSyncReport -Mode 'Full' -DryRun -ConfigPath $ResolvedConfigPath -MappingConfigPath '' -StatePath $Config.state.path -ArtifactType 'FreshSyncResetPreview'
+    foreach ($user in $Users) {
+        $samAccountName = if ($user.PSObject.Properties.Name -contains 'SamAccountName' -and -not [string]::IsNullOrWhiteSpace("$($user.SamAccountName)")) {
+            "$($user.SamAccountName)"
+        } else {
+            "(unknown-$([guid]::NewGuid().Guid.Substring(0, 8)))"
+        }
+        $distinguishedName = if ($user.PSObject.Properties.Name -contains 'DistinguishedName') { "$($user.DistinguishedName)" } else { $null }
+        $parentOu = Get-SfAdFreshResetParentOu -User $user
+        Add-SfAdReportEntry -Report $report -Bucket 'deletions' -Entry @{
+            workerId = $samAccountName
+            samAccountName = $samAccountName
+            distinguishedName = $distinguishedName
+            parentOu = $parentOu
+            reason = 'FreshSyncReset'
+        }
+        Add-SfAdReportOperation -Report $report -OperationType 'DeleteUser' -WorkerId $samAccountName -Bucket 'deletions' -Target @{
+            samAccountName = $samAccountName
+            distinguishedName = $distinguishedName
+        } -Before ([pscustomobject]@{
+                samAccountName = $samAccountName
+                distinguishedName = $distinguishedName
+                parentOu = $parentOu
+            }) -After $null -Status 'Preview' | Out-Null
+    }
+
+    $report.status = 'Preview'
+    $report.reviewSummary = [pscustomobject]@{
+        proposedDeletes = @($Users).Count
+        managedOus = @(Get-SfAdManagedOus -Config $Config)
+    }
+    return $report
+}
+
+function Save-SfAdFreshResetPreviewReport {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary]$Report,
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $directory = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path -Path $directory -PathType Container)) {
+        New-Item -Path $directory -ItemType Directory -Force | Out-Null
+    }
+
+    $Report['completedAt'] = (Get-Date).ToString('o')
+    [void]$Report.Remove('operationSequence')
+    $Report | ConvertTo-Json -Depth 20 | Set-Content -Path $Path
+    return $Path
+}
+
 $resolvedConfigPath = (Resolve-Path -Path $ConfigPath).Path
 $config = Get-SfAdSyncConfig -Path $resolvedConfigPath
 $logPath = Get-SfAdFreshResetLogPath -Config $config -RequestedPath $LogPath
+$previewReportPath = Get-SfAdFreshResetPreviewReportPath -Config $config -RequestedPath $PreviewReportPath
 $managedOus = @(Get-SfAdManagedOus -Config $config)
 $users = @(Get-SfAdUsersInOrganizationalUnits -Config $config -OrganizationalUnits $managedOus)
+$previewReport = New-SfAdFreshResetPreviewReport -Config $config -ResolvedConfigPath $resolvedConfigPath -Users $users
+[void](Save-SfAdFreshResetPreviewReport -Report $previewReport -Path $previewReportPath)
 
 Write-SfAdFreshResetLog -Path $logPath -Message 'SuccessFactors Fresh Sync Reset'
 Write-SfAdFreshResetLog -Path $logPath -Message "Config: $resolvedConfigPath"
 Write-SfAdFreshResetLog -Path $logPath -Message "Log: $logPath"
+Write-SfAdFreshResetLog -Path $logPath -Message "Preview report: $previewReportPath"
 Write-Host ''
 Write-Host 'Managed sync OUs'
 foreach ($ou in $managedOus) {
@@ -114,6 +236,14 @@ Write-Host "Discovered AD user objects: $($users.Count)"
 Write-SfAdFreshResetLog -Path $logPath -Message "Discovered AD user objects: $($users.Count)"
 foreach ($user in $users) {
     Write-SfAdFreshResetLog -Path $logPath -Message "Discovered user: $(Get-SfAdFreshResetUserLabel -User $user)"
+}
+Write-Host "Preview report: $previewReportPath"
+Write-Host 'Deletion preview'
+foreach ($user in $users | Select-Object -First 10) {
+    Write-Host "- $(Get-SfAdFreshResetUserLabel -User $user)"
+}
+if ($users.Count -gt 10) {
+    Write-Host "... $($users.Count - 10) more users in preview report"
 }
 Write-Host ''
 Write-Host 'Warning 1: This permanently deletes AD user objects found recursively under the managed sync OUs above.' -ForegroundColor Yellow

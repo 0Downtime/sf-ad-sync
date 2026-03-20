@@ -487,9 +487,17 @@ param(
         $resetLogs.Count | Should -Be 1
         $resetLogContent = Get-Content -Path $resetLogs[0].FullName -Raw
         $resetLogContent | Should -Match 'Discovered AD user objects: 2'
+        $resetLogContent | Should -Match 'Preview report:'
         $resetLogContent | Should -Match 'Deleting user: samAccountName=jdoe'
         $resetLogContent | Should -Match 'Deleted user: samAccountName=adoe'
         $resetLogContent | Should -Match 'Reset sync state:'
+        $previewReports = @(Get-ChildItem -Path $reportDirectory -Filter 'sf-ad-sync-ResetPreview-*.json' -File)
+        $previewReports.Count | Should -Be 1
+        $previewReport = Get-Content -Path $previewReports[0].FullName -Raw | ConvertFrom-Json -Depth 20
+        $previewReport.artifactType | Should -Be 'FreshSyncResetPreview'
+        $previewReport.status | Should -Be 'Preview'
+        $previewReport.deletions.Count | Should -Be 2
+        $previewReport.operations.Count | Should -Be 2
         Assert-MockCalled Read-Host -Times 3 -Exactly
         Assert-MockCalled Remove-SfAdUser -Times 2 -Exactly
         Assert-MockCalled Save-SfAdSyncState -Times 1 -Exactly

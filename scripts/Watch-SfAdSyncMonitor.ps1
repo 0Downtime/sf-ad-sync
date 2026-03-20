@@ -61,6 +61,33 @@ function Get-SfAdMonitorFreshResetLogPath {
     return Join-Path -Path $directory -ChildPath "sf-ad-sync-fresh-reset-$timestamp.log"
 }
 
+function Get-SfAdMonitorFreshResetPreviewReportPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ConfigPath
+    )
+
+    $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json -Depth 20
+    $directory = if (
+        $config.PSObject.Properties.Name -contains 'reporting' -and
+        $config.reporting -and
+        $config.reporting.PSObject.Properties.Name -contains 'outputDirectory' -and
+        -not [string]::IsNullOrWhiteSpace("$($config.reporting.outputDirectory)")
+    ) {
+        "$($config.reporting.outputDirectory)"
+    } else {
+        [System.IO.Path]::GetTempPath()
+    }
+
+    if (-not (Test-Path -Path $directory -PathType Container)) {
+        New-Item -Path $directory -ItemType Directory -Force | Out-Null
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    return Join-Path -Path $directory -ChildPath "sf-ad-sync-ResetPreview-$timestamp.json"
+}
+
 function Show-SfAdMonitorFrame {
     [CmdletBinding()]
     param(
@@ -590,6 +617,7 @@ function Invoke-SfAdMonitorShortcut {
             }
 
             $freshResetLogPath = Get-SfAdMonitorFreshResetLogPath -ConfigPath $context.configPath
+            $freshResetPreviewReportPath = Get-SfAdMonitorFreshResetPreviewReportPath -ConfigPath $context.configPath
 
             $argumentList = @(
                 '-NoLogo'
@@ -600,12 +628,14 @@ function Invoke-SfAdMonitorShortcut {
                 $context.configPath
                 '-LogPath'
                 $freshResetLogPath
+                '-PreviewReportPath'
+                $freshResetPreviewReportPath
             )
 
             try {
                 Start-Process -FilePath 'pwsh' -ArgumentList $argumentList | Out-Null
                 $UiState.statusMessage = 'Started fresh sync reset in a new PowerShell process.'
-                $UiState.commandOutput = @("Config=$($context.configPath)", "Log=$freshResetLogPath")
+                $UiState.commandOutput = @("Config=$($context.configPath)", "PreviewReport=$freshResetPreviewReportPath", "Log=$freshResetLogPath")
             } catch {
                 $UiState.statusMessage = 'Failed to start fresh sync reset.'
                 $UiState.commandOutput = @($_.Exception.Message)
