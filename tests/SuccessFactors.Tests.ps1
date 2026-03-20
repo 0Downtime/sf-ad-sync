@@ -234,6 +234,8 @@ Describe 'SuccessFactors module' {
                 throw 'Expected Invoke-SfODataGet to throw.'
             } catch {
                 $_.Exception.Message | Should -Match 'SuccessFactors OData request failed'
+                $_.Exception.Message | Should -Match 'Auth mode: oauth'
+                $_.Exception.Message | Should -Match 'Auth scheme: Bearer'
                 $_.Exception.Message | Should -Match 'odata request failed'
                 $_.Exception.Message | Should -Match 'URI: https://tenant\.example\.com/odata/v2/PerPerson'
                 $_.Exception.Message | Should -Not -Match 'Bearer token-1'

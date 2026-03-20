@@ -203,12 +203,19 @@ function New-SfRequestFailure {
         [AllowNull()]
         [System.Management.Automation.ErrorRecord]$ErrorRecord,
         [AllowNull()]
+        [string[]]$AdditionalDetails,
+        [AllowNull()]
         [string[]]$Secrets
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add("$Operation failed.")
     $lines.Add("URI: $Uri")
+    foreach ($detail in @($AdditionalDetails)) {
+        if (-not [string]::IsNullOrWhiteSpace($detail)) {
+            $lines.Add($detail)
+        }
+    }
 
     foreach ($line in Get-SfExceptionDetails -Exception $Exception -ErrorRecord $ErrorRecord -Secrets $Secrets) {
         $lines.Add($line)
@@ -334,11 +341,12 @@ function Invoke-SfODataGet {
     } catch {
         $authMode = Get-SfAuthMode -Config $Config
         $oauth = if ($Config.successFactors.PSObject.Properties.Name -contains 'auth') { $Config.successFactors.auth.oauth } else { $Config.successFactors.oauth }
+        $authScheme = if ($headers.Authorization -match '^(?<scheme>\S+)\s+') { $matches['scheme'] } else { '(missing)' }
         $secrets = @(
             $(if ($authMode -eq 'basic') { "$($Config.successFactors.auth.basic.password)" } else { "$($oauth.clientSecret)" }),
             "$($headers.Authorization)"
         )
-        throw (New-SfRequestFailure -Operation 'SuccessFactors OData request' -Uri $requestUri -Exception $_.Exception -ErrorRecord $_ -Secrets $secrets)
+        throw (New-SfRequestFailure -Operation 'SuccessFactors OData request' -Uri $requestUri -Exception $_.Exception -ErrorRecord $_ -AdditionalDetails @("Auth mode: $authMode", "Auth scheme: $authScheme") -Secrets $secrets)
     }
 }
 
