@@ -47,6 +47,7 @@ function Get-SfAdWorkerPreviewEntries {
 function Get-SfAdWorkerPreviewChangedAttributes {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Entries
     )
 
@@ -66,6 +67,7 @@ function Get-SfAdWorkerPreviewChangedAttributes {
 function Get-SfAdWorkerPreviewValue {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Entries,
         [Parameter(Mandatory)]
         [string]$PropertyName
@@ -158,9 +160,7 @@ switch ($PreviewMode) {
         if (-not ($config.successFactors.PSObject.Properties.Name -contains 'previewQuery') -or $null -eq $config.successFactors.previewQuery) {
             $config.successFactors | Add-Member -MemberType NoteProperty -Name 'previewQuery' -Value ([pscustomobject]@{
                     select = @(
-                        $config.successFactors.query.identityField,
-                        'firstName',
-                        'lastName'
+                        $config.successFactors.query.identityField
                     )
                     expand = @()
                 }) -Force

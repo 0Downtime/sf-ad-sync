@@ -176,7 +176,7 @@ pwsh ./scripts/Invoke-SfAdWorkerPreview.ps1 `
 The `-WorkerId` value must match `successFactors.query.identityField`. In the sample configs that field is `personIdExternal`.
 Use `-PreviewMode Minimal` to use `successFactors.previewQuery`, `-PreviewMode Full` to force the main `successFactors.query`, or omit it to preserve the configured default behavior.
 Use `-AsJson` for machine-readable output or `-OutputDirectory` to write the preview report to a separate folder.
-If your tenant metadata is still being validated, set `successFactors.previewQuery` to a minimal field list such as `personIdExternal`, `firstName`, and `lastName`. Single-worker preview uses `previewQuery` when present, while full and delta sync continue using `successFactors.query`.
+If your tenant metadata is still being validated, set `successFactors.previewQuery` to the smallest confirmed-valid field list, starting with just `personIdExternal`. Single-worker preview uses `previewQuery` when present, while full and delta sync continue using `successFactors.query`.
 
 To watch the current stage/progress and the last few syncs in a terminal dashboard:
 
