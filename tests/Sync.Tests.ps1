@@ -153,6 +153,29 @@ Describe 'Invoke-SfAdSyncRun' {
         }
     }
 
+    It 'treats nested emplStatus and nested employment startDate as worker status inputs' {
+        InModuleScope Sync {
+            $worker = [pscustomobject]@{
+                personIdExternal = '1001'
+                employmentNav = @(
+                    [pscustomobject]@{
+                        startDate = (Get-Date).ToString('o')
+                        jobInfoNav = @(
+                            [pscustomobject]@{
+                                emplStatus = 'A'
+                            }
+                        )
+                    }
+                )
+            }
+
+            (Get-SfAdWorkerStatusValue -Worker $worker) | Should -Be 'A'
+            (Get-SfAdWorkerStartDateValue -Worker $worker) | Should -Not -BeNullOrEmpty
+            (Test-SfAdWorkerIsActive -Worker $worker) | Should -BeTrue
+            (Test-SfAdWorkerIsPrehireEligible -Worker $worker -EnableBeforeDays 7) | Should -BeTrue
+        }
+    }
+
     It 'records disable and move operations for offboarding' {
         InModuleScope Sync {
             $user = [pscustomobject]@{

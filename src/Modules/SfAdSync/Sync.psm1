@@ -79,7 +79,44 @@ function Convert-ToSfAdSerializable {
 function Test-SfAdWorkerIsActive {
     [CmdletBinding()]
     param([pscustomobject]$Worker)
-    return @('active','enabled','a') -contains "$($Worker.status)".ToLowerInvariant()
+    $status = Get-SfAdWorkerStatusValue -Worker $Worker
+    return @('active', 'enabled', 'a', 'u') -contains "$status".ToLowerInvariant()
+}
+
+function Get-SfAdWorkerStatusValue {
+    [CmdletBinding()]
+    param([pscustomobject]$Worker)
+
+    foreach ($path in @(
+            'status',
+            'employmentNav[0].jobInfoNav[0].emplStatus',
+            'employmentNav[0].userNav.status',
+            'userNav.status'
+        )) {
+        $value = Get-NestedValue -InputObject $Worker -Path $path
+        if (-not [string]::IsNullOrWhiteSpace("$value")) {
+            return "$value"
+        }
+    }
+
+    return $null
+}
+
+function Get-SfAdWorkerStartDateValue {
+    [CmdletBinding()]
+    param([pscustomobject]$Worker)
+
+    foreach ($path in @(
+            'startDate',
+            'employmentNav[0].startDate'
+        )) {
+        $value = Get-NestedValue -InputObject $Worker -Path $path
+        if (-not [string]::IsNullOrWhiteSpace("$value")) {
+            return "$value"
+        }
+    }
+
+    return $null
 }
 
 function Get-SfAdWorkerIdentityValue {
@@ -100,11 +137,12 @@ function Test-SfAdWorkerIsPrehireEligible {
         [int]$EnableBeforeDays
     )
 
-    if (-not $Worker.startDate) {
+    $startDateValue = Get-SfAdWorkerStartDateValue -Worker $Worker
+    if (-not $startDateValue) {
         return $false
     }
 
-    $startDate = Get-Date $Worker.startDate
+    $startDate = Get-Date $startDateValue
     return $startDate.Date -le (Get-Date).Date.AddDays($EnableBeforeDays)
 }
 
@@ -496,7 +534,7 @@ function Invoke-SfAdOffboarding {
             suppressed = $true
             firstDisabledAt = (Get-Date).ToString('o')
             deleteAfter = (Get-Date).AddDays([int]$Config.sync.deletionRetentionDays).ToString('o')
-            lastSeenStatus = $Worker.status
+            lastSeenStatus = Get-SfAdWorkerStatusValue -Worker $Worker
         })
     }
 }
@@ -840,7 +878,7 @@ function Invoke-SfAdSyncRun {
                                 suppressed = $false
                                 firstDisabledAt = $null
                                 deleteAfter = $null
-                                lastSeenStatus = $worker.status
+                                lastSeenStatus = Get-SfAdWorkerStatusValue -Worker $worker
                             })
                         }
                     }
@@ -936,7 +974,7 @@ function Invoke-SfAdSyncRun {
                         suppressed = $false
                         firstDisabledAt = $null
                         deleteAfter = $null
-                        lastSeenStatus = $worker.status
+                        lastSeenStatus = Get-SfAdWorkerStatusValue -Worker $worker
                     })
                     if ($lastAction -eq "No attribute changes for worker $workerId.") {
                         $lastAction = "Refreshed tracked state for worker $workerId."
