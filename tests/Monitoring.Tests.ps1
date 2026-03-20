@@ -184,6 +184,7 @@ Describe 'Monitoring module' {
         $lines = @(Format-SfAdMonitorSelectedObjectLines -SelectedItem $selectedItem -SelectedOperation $selectedOperation)
 
         ($lines -join "`n") | Should -Match 'Item: workerId=1001'
+        ($lines -join "`n") | Should -Match 'Action: Update attributes for jdoe'
         ($lines -join "`n") | Should -Match 'Δ title: Old Title -> New Title'
         ($lines -join "`n") | Should -Match 'Δ department: Finance -> Engineering'
     }
@@ -206,6 +207,8 @@ Describe 'Monitoring module' {
                     after = $null
                 }))
 
+        ($createLines -join "`n") | Should -Match 'Action: Create account jdoe'
+        ($deleteLines -join "`n") | Should -Match 'Action: Delete account adoe'
         ($createLines -join "`n") | Should -Match 'Δ samAccountName: \(unset\) -> jdoe'
         ($deleteLines -join "`n") | Should -Match 'Δ samAccountName: adoe -> \(unset\)'
     }
@@ -880,17 +883,50 @@ Describe 'Monitoring module' {
         ($lines -join "`n") | Should -Match '\[CREATE\] Created=1'
         ($lines -join "`n") | Should -Match '\[DELETE\] Deleted=1'
         ($lines -join "`n") | Should -Match 'jdoe'
+        ($lines -join "`n") | Should -Match 'Action: Update attributes for jdoe'
         ($lines -join "`n") | Should -Match '\[UPDATE\] department \[department\]: Finance -> Sales'
 
         $uiState.reportCategoryIndex = 1
         $createLines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
         ($createLines -join "`n") | Should -Match 'asmith'
+        ($createLines -join "`n") | Should -Match 'Action: Create account asmith'
         ($createLines -join "`n") | Should -Match '\[CREATE\] enabled: \(unset\) -> True'
 
         $uiState.reportCategoryIndex = 2
         $deleteLines = @(Format-SfAdMonitorDashboardView -Status $status -UiState $uiState)
         ($deleteLines -join "`n") | Should -Match 'old.user'
+        ($deleteLines -join "`n") | Should -Match 'Action: Delete account old.user'
         ($deleteLines -join "`n") | Should -Match '\[DELETE\] enabled: False -> \(unset\)'
+    }
+
+    It 'formats disable and move operations as human readable actions' {
+        $disableLines = @(Format-SfAdMonitorSelectedObjectLines `
+                -SelectedItem ([pscustomobject]@{ workerId = '44522'; samAccountName = '44522' }) `
+                -SelectedOperation ([pscustomobject]@{
+                    operationType = 'DisableUser'
+                    target = [pscustomobject]@{ samAccountName = '44522' }
+                    before = [pscustomobject]@{ enabled = 'True' }
+                    after = [pscustomobject]@{ enabled = 'False' }
+                }))
+        $moveLines = @(Format-SfAdMonitorSelectedObjectLines `
+                -SelectedItem ([pscustomobject]@{ workerId = '44522'; samAccountName = '44522'; targetOu = 'OU=GRAVEYARD,DC=example,DC=com' }) `
+                -SelectedOperation ([pscustomobject]@{
+                    operationType = 'MoveUser'
+                    target = [pscustomobject]@{ samAccountName = '44522' }
+                    before = [pscustomobject]@{
+                        distinguishedName = 'CN=44522,OU=TestUsers,DC=example,DC=com'
+                        parentOu = 'OU=TestUsers,DC=example,DC=com'
+                    }
+                    after = [pscustomobject]@{
+                        targetOu = 'OU=GRAVEYARD,DC=example,DC=com'
+                    }
+                }))
+
+        ($disableLines -join "`n") | Should -Match 'Action: Disable account 44522'
+        ($disableLines -join "`n") | Should -Match 'Effect: Account sign-in will be turned off'
+        ($moveLines -join "`n") | Should -Match 'Action: Move account 44522'
+        ($moveLines -join "`n") | Should -Match 'From OU: OU=TestUsers,DC=example,DC=com'
+        ($moveLines -join "`n") | Should -Match 'To OU: OU=GRAVEYARD,DC=example,DC=com'
     }
 
     It 'renders a modal action prompt for selected worker preview runs' {

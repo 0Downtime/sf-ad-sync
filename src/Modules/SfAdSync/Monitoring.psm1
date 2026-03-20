@@ -1204,6 +1204,104 @@ function Get-SfAdMonitorOperationDiffLines {
     )
 }
 
+function Get-SfAdMonitorBucketDisplayLabel {
+    [CmdletBinding()]
+    param(
+        [string]$BucketName
+    )
+
+    switch ("$BucketName") {
+        'creates' { return 'Create account' }
+        'updates' { return 'Update attributes' }
+        'enables' { return 'Enable account' }
+        'disables' { return 'Disable account' }
+        'graveyardMoves' { return 'Move to graveyard OU' }
+        'deletions' { return 'Delete account' }
+        'unchanged' { return 'No change' }
+        default { return $BucketName }
+    }
+}
+
+function Get-SfAdMonitorOperationSummaryLines {
+    [CmdletBinding()]
+    param(
+        $Item,
+        $Operation
+    )
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if (-not $Operation) {
+        return @()
+    }
+
+    $targetSam = if (
+        $Operation.PSObject.Properties.Name -contains 'target' -and
+        $Operation.target -and
+        $Operation.target.PSObject.Properties.Name -contains 'samAccountName' -and
+        -not [string]::IsNullOrWhiteSpace("$($Operation.target.samAccountName)")
+    ) {
+        "$($Operation.target.samAccountName)"
+    } elseif ($Item -and $Item.PSObject.Properties.Name -contains 'samAccountName') {
+        "$($Item.samAccountName)"
+    } else {
+        'user'
+    }
+
+    switch ("$($Operation.operationType)") {
+        'DisableUser' {
+            $lines.Add("Action: Disable account $targetSam")
+            $lines.Add('Effect: Account sign-in will be turned off.')
+        }
+        'EnableUser' {
+            $lines.Add("Action: Enable account $targetSam")
+            $lines.Add('Effect: Account sign-in will be turned on.')
+        }
+        'MoveUser' {
+            $fromOu = if ($Operation.before -and $Operation.before.PSObject.Properties.Name -contains 'parentOu' -and -not [string]::IsNullOrWhiteSpace("$($Operation.before.parentOu)")) {
+                "$($Operation.before.parentOu)"
+            } else {
+                '(unknown)'
+            }
+            $toOu = if ($Operation.after -and $Operation.after.PSObject.Properties.Name -contains 'targetOu' -and -not [string]::IsNullOrWhiteSpace("$($Operation.after.targetOu)")) {
+                "$($Operation.after.targetOu)"
+            } else {
+                $(if ($Item -and $Item.PSObject.Properties.Name -contains 'targetOu' -and -not [string]::IsNullOrWhiteSpace("$($Item.targetOu)")) { "$($Item.targetOu)" } else { '(unknown)' })
+            }
+            $lines.Add("Action: Move account $targetSam")
+            $lines.Add("From OU: $fromOu")
+            $lines.Add("To OU: $toOu")
+        }
+        'CreateUser' {
+            $targetOu = if ($Operation.after -and $Operation.after.PSObject.Properties.Name -contains 'targetOu' -and -not [string]::IsNullOrWhiteSpace("$($Operation.after.targetOu)")) {
+                "$($Operation.after.targetOu)"
+            } elseif ($Item -and $Item.PSObject.Properties.Name -contains 'targetOu' -and -not [string]::IsNullOrWhiteSpace("$($Item.targetOu)")) {
+                "$($Item.targetOu)"
+            } else {
+                '(configured default)'
+            }
+            $lines.Add("Action: Create account $targetSam")
+            $lines.Add("Target OU: $targetOu")
+        }
+        'DeleteUser' {
+            $lines.Add("Action: Delete account $targetSam")
+            $lines.Add('Effect: The AD user object will be removed.')
+        }
+        'UpdateAttributes' {
+            $attributeCount = @(Get-SfAdMonitorOperationDiffLines -Operation $Operation).Count
+            $lines.Add("Action: Update attributes for $targetSam")
+            $lines.Add("Effect: $attributeCount attribute$(if ($attributeCount -eq 1) { '' } else { 's' }) will change.")
+        }
+        'AddGroupMembership' {
+            $lines.Add("Action: Add group membership for $targetSam")
+        }
+        default {
+            $lines.Add("Action: $($Operation.operationType) for $targetSam")
+        }
+    }
+
+    return @($lines)
+}
+
 function Get-SfAdMonitorReportExplorerCategoryDefinitions {
     [CmdletBinding()]
     param()
@@ -1307,6 +1405,7 @@ function Get-SfAdMonitorReportExplorerEntries {
             $entries.Add([pscustomobject]@{
                     Category = $bucketCategoryMap[$bucketName]
                     BucketName = $bucketName
+                    BucketLabel = Get-SfAdMonitorBucketDisplayLabel -BucketName $bucketName
                     WorkerId = if ($item -and $item.PSObject.Properties.Name -contains 'workerId') { "$($item.workerId)" } else { '' }
                     SamAccountName = if ($item -and $item.PSObject.Properties.Name -contains 'samAccountName') { "$($item.samAccountName)" } else { '' }
                     UserPrincipalName = if ($item -and $item.PSObject.Properties.Name -contains 'userPrincipalName') { "$($item.userPrincipalName)" } else { '' }
@@ -1487,7 +1586,7 @@ function Format-SfAdMonitorReportExplorerView {
                     $rowMarker, `
                     $(if ($entry.WorkerId) { $entry.WorkerId } else { '-' }), `
                     $(if ($entry.SamAccountName) { $entry.SamAccountName } else { '-' }), `
-                    $entry.BucketName, `
+                    $entry.BucketLabel, `
                     $entry.ChangeCount, `
                     $reasonText))
         }
@@ -1507,12 +1606,15 @@ function Format-SfAdMonitorReportExplorerView {
             'Deleted' { '[DELETE]' }
             default { '[UPDATE]' }
         }
-        $lines.Add("$entryMarker workerId=$(if ($entry.WorkerId) { $entry.WorkerId } else { '-' })    samAccountName=$(if ($entry.SamAccountName) { $entry.SamAccountName } else { '-' })    bucket=$($entry.BucketName)")
+        $lines.Add("$entryMarker workerId=$(if ($entry.WorkerId) { $entry.WorkerId } else { '-' })    samAccountName=$(if ($entry.SamAccountName) { $entry.SamAccountName } else { '-' })    action=$($entry.BucketLabel)")
         if (-not [string]::IsNullOrWhiteSpace($entry.TargetOu)) {
             $lines.Add("Target OU: $($entry.TargetOu)")
         }
         if ($entry.Operation) {
             $lines.Add("Operation: $($entry.Operation.operationType)")
+        }
+        foreach ($summaryLine in @(Get-SfAdMonitorOperationSummaryLines -Item $entry.Item -Operation $entry.Operation)) {
+            $lines.Add($summaryLine)
         }
         if ($diffRows.Count -eq 0) {
             $lines.Add('No attribute-level changes were recorded for this object.')
@@ -1562,6 +1664,9 @@ function Format-SfAdMonitorSelectedObjectLines {
         $lines.Add('Operation: no matching reversible operation recorded for the selected object.')
     } else {
         $lines.Add("Operation: $($SelectedOperation.operationType)    Target: $(ConvertTo-SfAdMonitorInlineText -Value $SelectedOperation.target)")
+        foreach ($summaryLine in @(Get-SfAdMonitorOperationSummaryLines -Item $SelectedItem -Operation $SelectedOperation)) {
+            $lines.Add($summaryLine)
+        }
         $diffLines = @(Get-SfAdMonitorOperationDiffLines -Operation $SelectedOperation)
         if ($diffLines.Count -eq 0) {
             if ($null -ne $SelectedOperation.after) {
