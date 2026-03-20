@@ -34,6 +34,33 @@ function Get-OptionalResolvedPath {
     return (Resolve-Path -Path $Path).Path
 }
 
+function Get-SfAdMonitorFreshResetLogPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ConfigPath
+    )
+
+    $config = Get-SfAdSyncConfig -Path $ConfigPath
+    $directory = if (
+        $config.PSObject.Properties.Name -contains 'reporting' -and
+        $config.reporting -and
+        $config.reporting.PSObject.Properties.Name -contains 'outputDirectory' -and
+        -not [string]::IsNullOrWhiteSpace("$($config.reporting.outputDirectory)")
+    ) {
+        "$($config.reporting.outputDirectory)"
+    } else {
+        [System.IO.Path]::GetTempPath()
+    }
+
+    if (-not (Test-Path -Path $directory -PathType Container)) {
+        New-Item -Path $directory -ItemType Directory -Force | Out-Null
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    return Join-Path -Path $directory -ChildPath "sf-ad-sync-fresh-reset-$timestamp.log"
+}
+
 function Show-SfAdMonitorFrame {
     [CmdletBinding()]
     param(
@@ -562,6 +589,8 @@ function Invoke-SfAdMonitorShortcut {
                 return
             }
 
+            $freshResetLogPath = Get-SfAdMonitorFreshResetLogPath -ConfigPath $context.configPath
+
             $argumentList = @(
                 '-NoLogo'
                 '-NoProfile'
@@ -569,12 +598,14 @@ function Invoke-SfAdMonitorShortcut {
                 (Join-Path $projectRoot 'scripts/Invoke-SfAdFreshSyncReset.ps1')
                 '-ConfigPath'
                 $context.configPath
+                '-LogPath'
+                $freshResetLogPath
             )
 
             try {
                 Start-Process -FilePath 'pwsh' -ArgumentList $argumentList | Out-Null
                 $UiState.statusMessage = 'Started fresh sync reset in a new PowerShell process.'
-                $UiState.commandOutput = @("Config=$($context.configPath)")
+                $UiState.commandOutput = @("Config=$($context.configPath)", "Log=$freshResetLogPath")
             } catch {
                 $UiState.statusMessage = 'Failed to start fresh sync reset.'
                 $UiState.commandOutput = @($_.Exception.Message)

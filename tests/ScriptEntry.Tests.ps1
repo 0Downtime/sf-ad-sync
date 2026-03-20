@@ -483,9 +483,50 @@ param(
         $global:SavedResetStatePath | Should -Be $statePath
         $global:SavedResetState.checkpoint | Should -Be $null
         @($global:SavedResetState.workers.Keys).Count | Should -Be 0
+        $resetLogs = @(Get-ChildItem -Path $reportDirectory -Filter 'sf-ad-sync-fresh-reset-*.log' -File)
+        $resetLogs.Count | Should -Be 1
+        $resetLogContent = Get-Content -Path $resetLogs[0].FullName -Raw
+        $resetLogContent | Should -Match 'Discovered AD user objects: 2'
+        $resetLogContent | Should -Match 'Deleting user: samAccountName=jdoe'
+        $resetLogContent | Should -Match 'Deleted user: samAccountName=adoe'
+        $resetLogContent | Should -Match 'Reset sync state:'
         Assert-MockCalled Read-Host -Times 3 -Exactly
         Assert-MockCalled Remove-SfAdUser -Times 2 -Exactly
         Assert-MockCalled Save-SfAdSyncState -Times 1 -Exactly
+    }
+
+    It 'writes the fresh reset log to an explicit requested log path' {
+        $configPath = Join-Path $TestDrive 'fresh-reset-config-custom-log.json'
+        $statePath = Join-Path $TestDrive 'fresh-reset-state-custom-log.json'
+        $reportDirectory = Join-Path $TestDrive 'fresh-reset-custom-log-reports'
+        $requestedLogPath = Join-Path $TestDrive 'custom-logs/fresh-reset.log'
+
+        (New-StatusConfigContent -StatePath $statePath -ReportDirectory $reportDirectory) | Set-Content -Path $configPath
+
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/ActiveDirectorySync.psm1" -Force -DisableNameChecking
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/State.psm1" -Force -DisableNameChecking
+
+        Mock Get-SfAdManagedOus { @('OU=Employees,DC=example,DC=com') }
+        Mock Get-SfAdUsersInOrganizationalUnits {
+            @(
+                [pscustomobject]@{
+                    SamAccountName = 'jdoe'
+                    DistinguishedName = 'CN=Jamie Doe,OU=Employees,DC=example,DC=com'
+                }
+            )
+        }
+        Mock Remove-SfAdUser {}
+        Mock Save-SfAdSyncState {}
+        $responses = [System.Collections.Generic.Queue[string]]::new()
+        $responses.Enqueue('DELETE')
+        $responses.Enqueue('1')
+        $responses.Enqueue('DELETE ALL SYNCED OU USERS')
+        Mock Read-Host { $responses.Dequeue() }
+
+        & "$PSScriptRoot/../scripts/Invoke-SfAdFreshSyncReset.ps1" -ConfigPath $configPath -LogPath $requestedLogPath | Out-Null
+
+        Test-Path -Path $requestedLogPath -PathType Leaf | Should -BeTrue
+        (Get-Content -Path $requestedLogPath -Raw) | Should -Match 'SuccessFactors Fresh Sync Reset'
     }
 
     It 'prompts for placeholder secret values and stores them in process environment variables' {
