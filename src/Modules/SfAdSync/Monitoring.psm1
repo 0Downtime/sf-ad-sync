@@ -1442,10 +1442,10 @@ function Get-SfAdMonitorReportExplorerSelection {
 
     return [pscustomobject]@{
         Report = $report
-        Categories = $categories
-        Entries = $entries
+        Categories = @($categories)
+        Entries = @($entries)
         SelectedCategory = $selectedCategory
-        CategoryEntries = $categoryEntries
+        CategoryEntries = @($categoryEntries)
         SelectedEntry = $selectedEntry
         SelectedCategoryIndex = $categoryIndex
         SelectedEntryIndex = $entryIndex
@@ -1543,6 +1543,9 @@ function Format-SfAdMonitorReportExplorerView {
 
     $selectedRun = Get-SfAdMonitorSelectedRun -Status $Status -UiState $UiState
     $selection = Get-SfAdMonitorReportExplorerSelection -Status $Status -UiState $UiState
+    $selectionEntries = @($selection.Entries)
+    $selectionCategoryEntries = @($selection.CategoryEntries)
+    $selectionCategories = @($selection.Categories)
     $diffRows = @(Get-SfAdMonitorReportExplorerDiffRows -Entry $selection.SelectedEntry)
     $lines = [System.Collections.Generic.List[string]]::new()
     $panelWidth = 110
@@ -1551,32 +1554,32 @@ function Format-SfAdMonitorReportExplorerView {
     $bottomBorder = "╚" + ("═" * ($panelWidth - 2)) + "╝"
     $rule = "─" * $panelWidth
 
-    $changedCount = @($selection.Entries | Where-Object { $_.Category -eq 'Changed' }).Count
-    $createdCount = @($selection.Entries | Where-Object { $_.Category -eq 'Created' }).Count
-    $deletedCount = @($selection.Entries | Where-Object { $_.Category -eq 'Deleted' }).Count
+    $changedCount = @($selectionEntries | Where-Object { $_.Category -eq 'Changed' }).Count
+    $createdCount = @($selectionEntries | Where-Object { $_.Category -eq 'Created' }).Count
+    $deletedCount = @($selectionEntries | Where-Object { $_.Category -eq 'Deleted' }).Count
     $selectedCategoryLabel = if ($selection.SelectedCategory) { $selection.SelectedCategory.Label } else { 'None' }
-    $selectedEntryPosition = [math]::Min($selection.SelectedEntryIndex + 1, [math]::Max($selection.CategoryEntries.Count, 1))
+    $selectedEntryPosition = [math]::Min($selection.SelectedEntryIndex + 1, [math]::Max($selectionCategoryEntries.Count, 1))
 
     $lines.Add($topBorder)
-    $lines.Add("║ Report Explorer    Run: $(if ($selectedRun.runId) { $selectedRun.runId } else { 'no-run' })    Category: $selectedCategoryLabel    Entry: $selectedEntryPosition/$([math]::Max($selection.CategoryEntries.Count, 1))")
+    $lines.Add("║ Report Explorer    Run: $(if ($selectedRun.runId) { $selectedRun.runId } else { 'no-run' })    Category: $selectedCategoryLabel    Entry: $selectedEntryPosition/$([math]::Max($selectionCategoryEntries.Count, 1))")
     $lines.Add("║ Summary: [UPDATE] Changed=$changedCount    [CREATE] Created=$createdCount    [DELETE] Deleted=$deletedCount")
     $lines.Add("║ Report: $(if ($selectedRun.path) { $selectedRun.path } else { '(none)' })")
     $lines.Add($midBorder)
     $lines.Add('▓ Categories')
-    foreach ($category in $selection.Categories) {
+    foreach ($category in $selectionCategories) {
         $isSelected = $selection.SelectedCategory -and $selection.SelectedCategory.Name -eq $category.Name
-        $count = @($selection.Entries | Where-Object { $_.Category -eq $category.Name }).Count
+        $count = @($selectionEntries | Where-Object { $_.Category -eq $category.Name }).Count
         $prefix = if ($isSelected) { ' > ' } else { '   ' }
         $lines.Add("$prefix$($category.Marker) $($category.Label) ($count)")
     }
     $lines.Add($rule)
     $lines.Add('▓ Objects')
     $lines.Add(' Sel Marker      WorkerId     SamAccountName        Bucket          Chg  Reason/Category')
-    if ($selection.CategoryEntries.Count -eq 0) {
+    if ($selectionCategoryEntries.Count -eq 0) {
         $lines.Add('  -  No objects in the selected category.')
     } else {
-        for ($i = 0; $i -lt [math]::Min($selection.CategoryEntries.Count, 6); $i += 1) {
-            $entry = $selection.CategoryEntries[$i]
+        for ($i = 0; $i -lt [math]::Min($selectionCategoryEntries.Count, 6); $i += 1) {
+            $entry = $selectionCategoryEntries[$i]
             $marker = if ($selection.SelectedEntry -and $entry -eq $selection.SelectedEntry) { ' > ' } else { '   ' }
             $rowMarker = switch ($entry.Category) {
                 'Created' { '[CREATE]' }
@@ -1594,8 +1597,8 @@ function Format-SfAdMonitorReportExplorerView {
                     $reasonText))
         }
 
-        if ($selection.CategoryEntries.Count -gt 6) {
-            $lines.Add("... $($selection.CategoryEntries.Count - 6) more objects")
+        if ($selectionCategoryEntries.Count -gt 6) {
+            $lines.Add("... $($selectionCategoryEntries.Count - 6) more objects")
         }
     }
     $lines.Add($rule)
