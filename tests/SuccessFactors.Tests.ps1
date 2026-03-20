@@ -262,6 +262,30 @@ Describe 'SuccessFactors module' {
         }
     }
 
+    It 'prefers ErrorDetails response bodies when HttpResponseMessage content is already disposed' {
+        InModuleScope SuccessFactors {
+            $response = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]::Unauthorized)
+            $response.Content = [System.Net.Http.StringContent]::new('{"error":"disposed"}')
+            $response.Dispose()
+
+            $exception = [System.Management.Automation.RuntimeException]::new('Response status code does not indicate success: 401 (Unauthorized).')
+            $exception | Add-Member -MemberType NoteProperty -Name Response -Value $response -Force
+
+            $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Unauthorized', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+            $errorRecord.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('{"error":"invalid_client","error_description":"client secret client-secret rejected"}')
+
+            try {
+                throw (New-SfRequestFailure -Operation 'SuccessFactors OData request' -Uri 'https://tenant.example.com/odata/v2/PerPerson' -Exception $exception -ErrorRecord $errorRecord -Secrets @('client-secret'))
+            } catch {
+                $_.Exception.Message | Should -Match 'HTTP status: Unauthorized'
+                $_.Exception.Message | Should -Match 'Response body:'
+                $_.Exception.Message | Should -Match 'invalid_client'
+                $_.Exception.Message | Should -Not -Match 'Response body read failed'
+                $_.Exception.Message | Should -Not -Match [regex]::Escape('client-secret')
+            }
+        }
+    }
+
     It 'returns an empty worker collection for unexpected response shapes' {
         InModuleScope SuccessFactors {
             Mock Invoke-SfODataGet { [pscustomobject]@{ unexpected = @('x') } }

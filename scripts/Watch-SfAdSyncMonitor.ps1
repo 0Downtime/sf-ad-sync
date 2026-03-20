@@ -4,7 +4,7 @@ param(
     [string]$ConfigPath,
     [string]$MappingConfigPath,
     [ValidateRange(1, 3600)]
-    [int]$RefreshIntervalSeconds = 3,
+    [int]$RefreshIntervalSeconds = 60,
     [ValidateRange(1, 1000)]
     [int]$HistoryLimit = 10,
     [switch]$PauseAutoRefresh,

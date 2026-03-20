@@ -125,6 +125,8 @@ function Get-SfExceptionDetails {
         [Parameter(Mandatory)]
         [System.Exception]$Exception,
         [AllowNull()]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [AllowNull()]
         [string[]]$Secrets
     )
 
@@ -149,6 +151,7 @@ function Get-SfExceptionDetails {
     if ($Exception.PSObject.Properties.Name -contains 'Response') {
         $response = $Exception.Response
     }
+
     if ($response) {
         $statusCode = $null
         $statusDescription = $null
@@ -163,20 +166,26 @@ function Get-SfExceptionDetails {
         } elseif ($null -ne $statusCode) {
             $details.Add("HTTP status code: $statusCode")
         }
+    }
 
+    $responseBody = $null
+    if ($ErrorRecord -and $ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace($ErrorRecord.ErrorDetails.Message)) {
+        $responseBody = $ErrorRecord.ErrorDetails.Message
+    } elseif ($response) {
         try {
             $responseBody = Get-SfHttpResponseBody -Response $response
-            if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
-                $responseBody = Get-SfSanitizedText -Text $responseBody -Secrets $Secrets
-                if ($responseBody.Length -gt 500) {
-                    $responseBody = $responseBody.Substring(0, 500)
-                }
-
-                $details.Add("Response body: $responseBody")
-            }
         } catch {
             $details.Add("Response body read failed: $($_.Exception.Message)")
         }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+        $responseBody = Get-SfSanitizedText -Text $responseBody -Secrets $Secrets
+        if ($responseBody.Length -gt 500) {
+            $responseBody = $responseBody.Substring(0, 500)
+        }
+
+        $details.Add("Response body: $responseBody")
     }
 
     return $details
@@ -192,6 +201,8 @@ function New-SfRequestFailure {
         [Parameter(Mandatory)]
         [System.Exception]$Exception,
         [AllowNull()]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [AllowNull()]
         [string[]]$Secrets
     )
 
@@ -199,7 +210,7 @@ function New-SfRequestFailure {
     $lines.Add("$Operation failed.")
     $lines.Add("URI: $Uri")
 
-    foreach ($line in Get-SfExceptionDetails -Exception $Exception -Secrets $Secrets) {
+    foreach ($line in Get-SfExceptionDetails -Exception $Exception -ErrorRecord $ErrorRecord -Secrets $Secrets) {
         $lines.Add($line)
     }
 
@@ -259,7 +270,7 @@ function Get-SfOAuthToken {
         $secrets = @(
             "$($oauth.clientSecret)"
         )
-        throw (New-SfRequestFailure -Operation 'SuccessFactors OAuth token request' -Uri $tokenUri -Exception $_.Exception -Secrets $secrets)
+        throw (New-SfRequestFailure -Operation 'SuccessFactors OAuth token request' -Uri $tokenUri -Exception $_.Exception -ErrorRecord $_ -Secrets $secrets)
     }
 
     if (-not $response.access_token) {
@@ -327,7 +338,7 @@ function Invoke-SfODataGet {
             $(if ($authMode -eq 'basic') { "$($Config.successFactors.auth.basic.password)" } else { "$($oauth.clientSecret)" }),
             "$($headers.Authorization)"
         )
-        throw (New-SfRequestFailure -Operation 'SuccessFactors OData request' -Uri $requestUri -Exception $_.Exception -Secrets $secrets)
+        throw (New-SfRequestFailure -Operation 'SuccessFactors OData request' -Uri $requestUri -Exception $_.Exception -ErrorRecord $_ -Secrets $secrets)
     }
 }
 
