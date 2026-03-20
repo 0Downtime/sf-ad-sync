@@ -421,6 +421,7 @@ function Get-SfAdMonitorStatus {
         }
         trackedWorkers = $trackedWorkers
         context = [pscustomobject]@{
+            successFactorsAuth = Get-SfAdSuccessFactorsAuthSummary -Config $config
             identityField = $config.successFactors.query.identityField
             identityAttribute = $config.ad.identityAttribute
             defaultActiveOu = $config.ad.defaultActiveOu
@@ -450,9 +451,17 @@ function Format-SfAdMonitorView {
         [pscustomobject]$Status
     )
 
+    $authSummary = if (
+        $Status.PSObject.Properties.Name -contains 'context' -and
+        $Status.context -and
+        $Status.context.PSObject.Properties.Name -contains 'successFactorsAuth' -and
+        -not [string]::IsNullOrWhiteSpace("$($Status.context.successFactorsAuth)")
+    ) { "$($Status.context.successFactorsAuth)" } else { '-' }
+
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('SuccessFactors AD Sync Monitor')
     $lines.Add("Config: $($Status.paths.configPath)")
+    $lines.Add("SuccessFactors auth: $authSummary")
     $lines.Add("Refreshed: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))")
     $lines.Add('')
     $lines.Add('Current Run')
@@ -1101,6 +1110,24 @@ function Format-SfAdMonitorDashboardView {
     $bottomBorder = "╚" + ("═" * ($panelWidth - 2)) + "╝"
     $rule = "─" * $panelWidth
 
+    $authSummary = if (
+        $Status.PSObject.Properties.Name -contains 'context' -and
+        $Status.context -and
+        $Status.context.PSObject.Properties.Name -contains 'successFactorsAuth' -and
+        -not [string]::IsNullOrWhiteSpace("$($Status.context.successFactorsAuth)")
+    ) { "$($Status.context.successFactorsAuth)" } else { '-' }
+    $identityField = if (
+        $Status.PSObject.Properties.Name -contains 'context' -and
+        $Status.context -and
+        $Status.context.PSObject.Properties.Name -contains 'identityField' -and
+        -not [string]::IsNullOrWhiteSpace("$($Status.context.identityField)")
+    ) { "$($Status.context.identityField)" } else { '-' }
+    $identityAttribute = if (
+        $Status.PSObject.Properties.Name -contains 'context' -and
+        $Status.context -and
+        $Status.context.PSObject.Properties.Name -contains 'identityAttribute' -and
+        -not [string]::IsNullOrWhiteSpace("$($Status.context.identityAttribute)")
+    ) { "$($Status.context.identityAttribute)" } else { '-' }
     $latestState = if ($Status.latestRun.status -eq 'Failed' -or $Status.currentRun.errorMessage) { 'ERROR' } elseif ($Status.currentRun.status -eq 'InProgress') { 'ACTIVE' } else { 'OK' }
     $selectedRunPosition = [math]::Min([int]$UiState.selectedRunIndex + 1, [math]::Max(@($Status.recentRuns).Count, 1))
     $selectedItemPosition = [math]::Min([int]$UiState.selectedItemIndex + 1, [math]::Max($filteredItems.Count, 1))
@@ -1108,6 +1135,7 @@ function Format-SfAdMonitorDashboardView {
     $lines.Add($topBorder)
     $lines.Add("║ SuccessFactors AD Sync Dashboard [$latestState]    AutoRefresh: $(if ($UiState.autoRefreshEnabled) { 'On' } else { 'Paused' })    Refreshed: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))")
     $lines.Add("║ Run: $selectedRunPosition/$([math]::Max(@($Status.recentRuns).Count, 1))    Bucket: $($selectedBucket.Bucket.Label)    Filter: $(if ([string]::IsNullOrWhiteSpace($UiState.filterText)) { '(none)' } else { $UiState.filterText })    Match: $($filteredItems.Count)/$(@($selectedBucket.Items).Count)    Item: $selectedItemPosition/$([math]::Max($filteredItems.Count, 1))")
+    $lines.Add("║ Config: SF Auth=$authSummary    Identity=$identityField -> AD $identityAttribute")
     $lines.Add($midBorder)
     $lines.Add('▓ Current Run')
     $lines.Add("Status: $($Status.currentRun.status)    Stage: $($Status.currentRun.stage)    Mode: $($Status.currentRun.mode)    DryRun: $($Status.currentRun.dryRun)")

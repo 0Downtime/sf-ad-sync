@@ -17,6 +17,7 @@
       },
       "oauth": {
         "tokenUrl": "https://example.authentication.successfactors.com/oauth/token",
+        "clientAuthentication": "body",
         "clientId": "",
         "clientSecret": "",
         "companyId": ""

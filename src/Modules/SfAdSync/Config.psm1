@@ -93,6 +93,32 @@ function Get-SfAdAuthMode {
     return 'basic'
 }
 
+function Get-SfAdSuccessFactorsAuthSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Config
+    )
+
+    $authMode = Get-SfAdAuthMode -Config $Config
+    if ($authMode -eq 'basic') {
+        return 'basic'
+    }
+
+    $auth = Initialize-SfAdSuccessFactorsAuthConfig -Config $Config
+    $oauth = $auth.oauth
+    $clientAuthentication = if (
+        (Test-SfAdHasProperty -InputObject $oauth -PropertyName 'clientAuthentication') -and
+        -not [string]::IsNullOrWhiteSpace("$($oauth.clientAuthentication)")
+    ) {
+        "$($oauth.clientAuthentication)".ToLowerInvariant()
+    } else {
+        'body'
+    }
+
+    return "oauth ($clientAuthentication client auth)"
+}
+
 function Initialize-SfAdSuccessFactorsAuthConfig {
     [CmdletBinding()]
     param(
@@ -323,4 +349,4 @@ function Test-SfAdSyncConfig {
     }
 }
 
-Export-ModuleMember -Function Get-SfAdResolvedSetting, Resolve-SfAdSyncSecrets, Get-SfAdSyncConfig, Get-SfAdSyncMappingConfig, Test-SfAdSyncConfig, Test-SfAdSyncMappingConfig
+Export-ModuleMember -Function Get-SfAdResolvedSetting, Get-SfAdSuccessFactorsAuthSummary, Resolve-SfAdSyncSecrets, Get-SfAdSyncConfig, Get-SfAdSyncMappingConfig, Test-SfAdSyncConfig, Test-SfAdSyncMappingConfig

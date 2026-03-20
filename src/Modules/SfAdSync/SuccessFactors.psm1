@@ -38,6 +38,21 @@ function Get-SfBasicAuthHeaderValue {
     return 'Basic ' + [Convert]::ToBase64String($credentialBytes)
 }
 
+function Get-SfOAuthClientAuthenticationMode {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Config
+    )
+
+    $oauth = if ($Config.successFactors.PSObject.Properties.Name -contains 'auth') { $Config.successFactors.auth.oauth } else { $Config.successFactors.oauth }
+    if ($oauth -and $oauth.PSObject.Properties.Name -contains 'clientAuthentication' -and -not [string]::IsNullOrWhiteSpace("$($oauth.clientAuthentication)")) {
+        return "$($oauth.clientAuthentication)".ToLowerInvariant()
+    }
+
+    return 'body'
+}
+
 function Get-SfSanitizedText {
     [CmdletBinding()]
     param(
@@ -62,6 +77,46 @@ function Get-SfSanitizedText {
     }
 
     return $sanitized
+}
+
+function Get-SfHttpResponseBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$Response
+    )
+
+    if ($null -eq $Response) {
+        return $null
+    }
+
+    if ($Response.PSObject.Methods.Name -contains 'GetResponseStream') {
+        $responseStream = $Response.GetResponseStream()
+        if (-not $responseStream) {
+            return $null
+        }
+
+        $reader = [System.IO.StreamReader]::new($responseStream)
+        try {
+            return $reader.ReadToEnd()
+        } finally {
+            $reader.Dispose()
+            $responseStream.Dispose()
+        }
+    }
+
+    if ($Response -is [System.Net.Http.HttpResponseMessage] -and $null -ne $Response.Content) {
+        return $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    }
+
+    if ($Response.PSObject.Properties.Name -contains 'Content' -and $null -ne $Response.Content) {
+        $content = $Response.Content
+        if ($content.PSObject.Methods.Name -contains 'ReadAsStringAsync') {
+            return $content.ReadAsStringAsync().GetAwaiter().GetResult()
+        }
+    }
+
+    return $null
 }
 
 function Get-SfExceptionDetails {
@@ -110,24 +165,14 @@ function Get-SfExceptionDetails {
         }
 
         try {
-            $responseStream = $response.GetResponseStream()
-            if ($responseStream) {
-                $reader = [System.IO.StreamReader]::new($responseStream)
-                try {
-                    $responseBody = $reader.ReadToEnd()
-                } finally {
-                    $reader.Dispose()
-                    $responseStream.Dispose()
+            $responseBody = Get-SfHttpResponseBody -Response $response
+            if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                $responseBody = Get-SfSanitizedText -Text $responseBody -Secrets $Secrets
+                if ($responseBody.Length -gt 500) {
+                    $responseBody = $responseBody.Substring(0, 500)
                 }
 
-                if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
-                    $responseBody = Get-SfSanitizedText -Text $responseBody -Secrets $Secrets
-                    if ($responseBody.Length -gt 500) {
-                        $responseBody = $responseBody.Substring(0, 500)
-                    }
-
-                    $details.Add("Response body: $responseBody")
-                }
+                $details.Add("Response body: $responseBody")
             }
         } catch {
             $details.Add("Response body read failed: $($_.Exception.Message)")
@@ -174,10 +219,23 @@ function Get-SfOAuthToken {
         throw "successFactors.auth.oauth.tokenUrl is required."
     }
 
+    $clientAuthentication = Get-SfOAuthClientAuthenticationMode -Config $Config
+    if (@('body', 'basic') -notcontains $clientAuthentication) {
+        throw "successFactors.auth.oauth.clientAuthentication must be 'body' or 'basic'."
+    }
+
     $body = @{
-        grant_type    = 'client_credentials'
-        client_id     = $oauth.clientId
-        client_secret = $oauth.clientSecret
+        grant_type = 'client_credentials'
+    }
+
+    $headers = @{}
+
+    if ($clientAuthentication -eq 'basic') {
+        $credentialBytes = [System.Text.Encoding]::UTF8.GetBytes("$($oauth.clientId):$($oauth.clientSecret)")
+        $headers.Authorization = 'Basic ' + [Convert]::ToBase64String($credentialBytes)
+    } else {
+        $body['client_id'] = $oauth.clientId
+        $body['client_secret'] = $oauth.clientSecret
     }
 
     if ($oauth.companyId) {
@@ -185,7 +243,18 @@ function Get-SfOAuthToken {
     }
 
     try {
-        $response = Invoke-RestMethod -Uri $tokenUri -Method Post -Body $body -ContentType 'application/x-www-form-urlencoded'
+        $invokeParams = @{
+            Uri         = $tokenUri
+            Method      = 'Post'
+            Body        = $body
+            ContentType = 'application/x-www-form-urlencoded'
+        }
+
+        if ($headers.Count -gt 0) {
+            $invokeParams['Headers'] = $headers
+        }
+
+        $response = Invoke-RestMethod @invokeParams
     } catch {
         $secrets = @(
             "$($oauth.clientSecret)"

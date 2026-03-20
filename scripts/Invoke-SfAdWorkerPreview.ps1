@@ -142,9 +142,11 @@ Import-Module (Join-Path $moduleRoot 'Config.psm1') -Force -DisableNameChecking
 $resolvedConfigPath = (Resolve-Path -Path $ConfigPath).Path
 $resolvedMappingConfigPath = (Resolve-Path -Path $MappingConfigPath).Path
 $effectiveConfigPath = $resolvedConfigPath
+$resolvedConfig = Get-SfAdSyncConfig -Path $resolvedConfigPath
+$successFactorsAuth = Get-SfAdSuccessFactorsAuthSummary -Config $resolvedConfig
 
 if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $config = Get-SfAdSyncConfig -Path $resolvedConfigPath
+    $config = $resolvedConfig
     $config.reporting.reviewOutputDirectory = (Resolve-Path -Path (New-Item -Path $OutputDirectory -ItemType Directory -Force)).Path
     $overlayPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("sf-ad-sync-worker-preview-config-{0}.json" -f ([guid]::NewGuid().Guid))
     try {
@@ -181,6 +183,7 @@ $result = [pscustomobject]@{
     mode = $report.mode
     status = $report.status
     artifactType = $report.artifactType
+    successFactorsAuth = $successFactorsAuth
     workerScope = $report.workerScope
     reviewSummary = $report.reviewSummary
     preview = [pscustomobject]@{
@@ -214,6 +217,7 @@ Write-Host 'SuccessFactors Worker Preview'
 Write-Host "Report: $($result.reportPath)"
 Write-Host "Run ID: $($result.runId)"
 Write-Host "Status: $($result.status)"
+Write-Host "SuccessFactors auth: $($result.successFactorsAuth)"
 Write-Host "Worker: $WorkerId"
 if ($result.workerScope) {
     Write-Host "Identity field: $($result.workerScope.identityField)"

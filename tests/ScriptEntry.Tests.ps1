@@ -271,6 +271,7 @@ param(
         $result = & "$PSScriptRoot/../scripts/Invoke-SfAdWorkerPreview.ps1" -ConfigPath $configPath -MappingConfigPath $mappingPath -WorkerId '1001' -AsJson | ConvertFrom-Json -Depth 20
 
         $result.artifactType | Should -Be 'WorkerPreview'
+        $result.successFactorsAuth | Should -Be 'oauth (body client auth)'
         $result.workerScope.workerId | Should -Be '1001'
         $result.preview.samAccountName | Should -Be 'jdoe'
         $result.preview.reviewCategory | Should -Be 'ExistingUserChanges'
@@ -735,6 +736,7 @@ param(
         $result = & "$PSScriptRoot/../scripts/Watch-SfAdSyncMonitor.ps1" -ConfigPath $configPath -RunOnce -AsText
 
         $result | Should -Match 'SuccessFactors AD Sync Monitor'
+        $result | Should -Match 'SuccessFactors auth: oauth \(body client auth\)'
         $result | Should -Match 'Stage: ProcessingWorkers'
         $result | Should -Match 'Updated attributes for worker 1002'
         $result | Should -Match 'Succeeded'

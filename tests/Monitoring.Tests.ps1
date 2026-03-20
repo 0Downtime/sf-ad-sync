@@ -337,6 +337,7 @@ Describe 'Monitoring module' {
                 }
             )
             context = [pscustomobject]@{
+                successFactorsAuth = 'oauth (body client auth)'
                 identityField = 'personIdExternal'
                 identityAttribute = 'employeeID'
                 defaultActiveOu = 'OU=Employees,DC=example,DC=com'
@@ -374,6 +375,7 @@ Describe 'Monitoring module' {
 
         ($lines -join "`n") | Should -Match 'SuccessFactors AD Sync Dashboard'
         ($lines -join "`n") | Should -Match 'AutoRefresh: On'
+        ($lines -join "`n") | Should -Match 'SF Auth=oauth \(body client auth\)'
         ($lines -join "`n") | Should -Match 'Detail: Quarantined'
         ($lines -join "`n") | Should -Match 'Filter: manager'
         ($lines -join "`n") | Should -Match 'Diagnostics:'
@@ -381,7 +383,6 @@ Describe 'Monitoring module' {
         ($lines -join "`n") | Should -Match 'Operation: no matching reversible operation'
         ($lines -join "`n") | Should -Match 'workerId=1002'
         ($lines -join "`n") | Should -Match 'Tracked: workerId=1002'
-        ($lines -join "`n") | Should -Not -Match 'Config:'
         ($lines -join "`n") | Should -Not -Match 'Context:'
         ($lines -join "`n") | Should -Not -Match 'Paths:'
     }

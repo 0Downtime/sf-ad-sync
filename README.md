@@ -79,6 +79,7 @@ Planned work is ordered by delivery priority so the roadmap is easy to scan from
 ## Setup
 1. Start from `config/local.real-successfactors.real-ad.sync-config.json` and `config/local.successfactors-to-ad.mapping-config.json` for your real environment. Those `local.*` files are ignored by git so you can store tenant-specific AD and SuccessFactors settings safely outside version control.
 2. Fill in the SuccessFactors auth block, tenant query fields, OU routing, and licensing groups. The real sample config defaults to basic auth, while the mock sample uses OAuth. Only fill in the AD server and bind credentials if you are running from a non-domain-joined host or need to target a specific DC.
+   If your SuccessFactors OAuth token endpoint requires HTTP Basic client authentication, set `successFactors.auth.oauth.clientAuthentication` to `basic`; leave it as `body` when the endpoint expects `client_id` and `client_secret` in the form body.
 3. Confirm the immutable SuccessFactors identity field and the AD attribute that stores it.
 4. Install RSAT Active Directory tools and ensure the host can reach SuccessFactors.
 5. Validate any nested SuccessFactors fields you want to sync and align them to your tenant metadata.

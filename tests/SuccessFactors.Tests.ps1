@@ -32,6 +32,7 @@ Describe 'SuccessFactors module' {
                 $script:CapturedTokenMethod = $Method
                 $script:CapturedTokenContentType = $ContentType
                 $script:CapturedTokenBody = $Body
+                $script:CapturedTokenHeaders = $Headers
                 [pscustomobject]@{ access_token = 'token-123' }
             }
 
@@ -44,6 +45,45 @@ Describe 'SuccessFactors module' {
             $script:CapturedTokenBody.client_id | Should -Be 'client-id'
             $script:CapturedTokenBody.client_secret | Should -Be 'client-secret'
             $script:CapturedTokenBody.company_id | Should -Be 'company-id'
+            $script:CapturedTokenHeaders | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'supports HTTP Basic client authentication for the OAuth token request' {
+        InModuleScope SuccessFactors {
+            $basicClientAuthConfig = [pscustomobject]@{
+                successFactors = [pscustomobject]@{
+                    baseUrl = 'https://tenant.example.com/odata/v2'
+                    oauth = [pscustomobject]@{
+                        tokenUrl = 'https://tenant.example.com/oauth/token'
+                        clientId = 'client-id'
+                        clientSecret = 'client-secret'
+                        companyId = 'company-id'
+                        clientAuthentication = 'basic'
+                    }
+                }
+            }
+
+            Mock Invoke-RestMethod {
+                $script:CapturedTokenUri = $Uri
+                $script:CapturedTokenMethod = $Method
+                $script:CapturedTokenContentType = $ContentType
+                $script:CapturedTokenBody = $Body
+                $script:CapturedTokenHeaders = $Headers
+                [pscustomobject]@{ access_token = 'token-basic' }
+            }
+
+            $token = Get-SfOAuthToken -Config $basicClientAuthConfig
+
+            $token | Should -Be 'token-basic'
+            $script:CapturedTokenUri | Should -Be 'https://tenant.example.com/oauth/token'
+            $script:CapturedTokenMethod | Should -Be 'Post'
+            $script:CapturedTokenContentType | Should -Be 'application/x-www-form-urlencoded'
+            $script:CapturedTokenBody.grant_type | Should -Be 'client_credentials'
+            $script:CapturedTokenBody.company_id | Should -Be 'company-id'
+            $script:CapturedTokenBody.ContainsKey('client_id') | Should -BeFalse
+            $script:CapturedTokenBody.ContainsKey('client_secret') | Should -BeFalse
+            $script:CapturedTokenHeaders.Authorization | Should -Be ('Basic ' + [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes('client-id:client-secret')))
         }
     }
 
@@ -197,6 +237,27 @@ Describe 'SuccessFactors module' {
                 $_.Exception.Message | Should -Match 'odata request failed'
                 $_.Exception.Message | Should -Match 'URI: https://tenant\.example\.com/odata/v2/PerPerson'
                 $_.Exception.Message | Should -Not -Match 'Bearer token-1'
+            }
+        }
+    }
+
+    It 'includes HttpResponseMessage bodies in request failures on PowerShell 7' {
+        InModuleScope SuccessFactors {
+            $response = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]::Unauthorized)
+            $response.Content = [System.Net.Http.StringContent]::new('{"error":"invalid_client","error_description":"client secret client-secret rejected"}')
+
+            $exception = [System.Management.Automation.RuntimeException]::new('Response status code does not indicate success: 401 (Unauthorized).')
+            $exception | Add-Member -MemberType NoteProperty -Name Response -Value $response -Force
+
+            try {
+                throw (New-SfRequestFailure -Operation 'SuccessFactors OAuth token request' -Uri 'https://tenant.example.com/oauth/token' -Exception $exception -Secrets @('client-secret'))
+            } catch {
+                $_.Exception.Message | Should -Match 'HTTP status: Unauthorized'
+                $_.Exception.Message | Should -Match 'Response body:'
+                $_.Exception.Message | Should -Match 'invalid_client'
+                $_.Exception.Message | Should -Not -Match [regex]::Escape('client-secret')
+            } finally {
+                $response.Dispose()
             }
         }
     }
