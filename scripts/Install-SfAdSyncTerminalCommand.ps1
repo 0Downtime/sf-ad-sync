@@ -230,7 +230,7 @@ function ConvertTo-SfAdDoubleQuotedShellValue {
         return ''
     }
 
-    return $Value.Replace('\', '\\').Replace('"', '\"').Replace('$', '\$').Replace('`', '\`')
+    return $Value.Replace('"', '\"').Replace('$', '\$').Replace('`', '\`')
 }
 
 function Get-SfAdPowerShellShimContent {
@@ -298,7 +298,9 @@ if (`$AsText) {
 }
 
 & $(ConvertTo-SfAdPowerShellLiteral -Value $DashboardPath) @namedArguments
-exit `$LASTEXITCODE
+if (Get-Variable -Name LASTEXITCODE -ErrorAction SilentlyContinue) {
+    exit `$LASTEXITCODE
+}
 "@
 }
 
@@ -397,6 +399,38 @@ function Add-SfAdInstallDirectoryToPath {
 
     $pathSeparator = [System.IO.Path]::PathSeparator
     $env:PATH = "$ResolvedInstallDirectory$pathSeparator$env:PATH"
+
+    if (-not [string]::IsNullOrWhiteSpace($ShellProfilePathOverride)) {
+        $profilePath = Get-SfAdShellProfilePath -OverridePath $ShellProfilePathOverride
+        $profileDirectory = Split-Path -Path $profilePath -Parent
+        if ($profileDirectory -and -not (Test-Path -Path $profileDirectory -PathType Container)) {
+            New-Item -Path $profileDirectory -ItemType Directory -Force | Out-Null
+        }
+
+        $escapedDirectory = ConvertTo-SfAdDoubleQuotedShellValue -Value $ResolvedInstallDirectory
+        $exportLine = "export PATH=""${escapedDirectory}:`$PATH"""
+
+        if (Test-Path -Path $profilePath -PathType Leaf) {
+            $profileContent = Get-Content -Path $profilePath -Raw
+            if ($profileContent -notmatch [regex]::Escape($exportLine)) {
+                if ($profileContent.Length -gt 0 -and -not $profileContent.EndsWith("`n")) {
+                    Add-Content -Path $profilePath -Value ''
+                }
+
+                Add-Content -Path $profilePath -Value $exportLine
+            }
+        } else {
+            Set-Content -Path $profilePath -Value $exportLine
+        }
+
+        return [pscustomobject]@{
+            updated = $true
+            currentSessionUpdated = $true
+            shellProfilePath = $profilePath
+            mode = 'ShellProfile'
+            message = "Added install directory to PATH and persisted it in '$profilePath'."
+        }
+    }
 
     if ($IsWindows) {
         $userPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
