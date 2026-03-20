@@ -41,7 +41,7 @@ function Get-SfAdMonitorFreshResetLogPath {
         [string]$ConfigPath
     )
 
-    $config = Get-SfAdSyncConfig -Path $ConfigPath
+    $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json -Depth 20
     $directory = if (
         $config.PSObject.Properties.Name -contains 'reporting' -and
         $config.reporting -and
