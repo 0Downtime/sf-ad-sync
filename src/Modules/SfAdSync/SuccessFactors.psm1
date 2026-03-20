@@ -383,6 +383,362 @@ function Invoke-SfODataGet {
     }
 }
 
+function Get-SfEntityShortName {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string]$EntityName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($EntityName)) {
+        return $null
+    }
+
+    $segments = $EntityName -split '\.'
+    return $segments[$segments.Length - 1]
+}
+
+function Get-SfODataMetadataXml {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Config
+    )
+
+    $baseUrl = $Config.successFactors.baseUrl.TrimEnd('/')
+    $requestUri = "$baseUrl/`$metadata"
+    $headers = Get-SfAuthHeaders -Config $Config
+    $headers.Accept = 'application/xml'
+
+    try {
+        $response = Invoke-WebRequest -Uri $requestUri -Headers $headers -Method Get
+        return $response.Content
+    } catch {
+        $authMode = Get-SfAuthMode -Config $Config
+        $oauth = if ($Config.successFactors.PSObject.Properties.Name -contains 'auth') { $Config.successFactors.auth.oauth } else { $Config.successFactors.oauth }
+        $authScheme = if ($headers.Authorization -match '^(?<scheme>\S+)\s+') { $matches['scheme'] } else { '(missing)' }
+        $secrets = @(
+            $(if ($authMode -eq 'basic') { "$($Config.successFactors.auth.basic.password)" } else { "$($oauth.clientSecret)" }),
+            "$($headers.Authorization)"
+        )
+        throw (New-SfRequestFailure -Operation 'SuccessFactors metadata request' -Uri $requestUri -Exception $_.Exception -ErrorRecord $_ -AdditionalDetails @("Auth mode: $authMode", "Auth scheme: $authScheme") -Secrets $secrets)
+    }
+}
+
+function ConvertFrom-SfODataMetadataXml {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$MetadataXml
+    )
+
+    $document = [xml]$MetadataXml
+    $namespaceManager = [System.Xml.XmlNamespaceManager]::new($document.NameTable)
+    $namespaceManager.AddNamespace('edmx', 'http://schemas.microsoft.com/ado/2007/06/edmx')
+    $namespaceManager.AddNamespace('edm', 'http://schemas.microsoft.com/ado/2008/09/edm')
+
+    $associations = @{}
+    foreach ($schema in @($document.SelectNodes('//edm:Schema', $namespaceManager))) {
+        $schemaNamespace = "$($schema.Namespace)"
+        foreach ($association in @($schema.SelectNodes('edm:Association', $namespaceManager))) {
+            $associationName = "$schemaNamespace.$($association.Name)"
+            $ends = @()
+            foreach ($end in @($association.SelectNodes('edm:End', $namespaceManager))) {
+                $ends += [pscustomobject]@{
+                    role         = "$($end.Role)"
+                    entityType   = Get-SfEntityShortName -EntityName "$($end.Type)"
+                    multiplicity = "$($end.Multiplicity)"
+                }
+            }
+
+            $associations[$associationName] = $ends
+        }
+    }
+
+    $entities = [ordered]@{}
+    foreach ($schema in @($document.SelectNodes('//edm:Schema', $namespaceManager))) {
+        foreach ($entityType in @($schema.SelectNodes('edm:EntityType', $namespaceManager))) {
+            $propertyNames = @($entityType.SelectNodes('edm:Property', $namespaceManager) | ForEach-Object { "$($_.Name)" })
+            $navigationProperties = @()
+            foreach ($navigationProperty in @($entityType.SelectNodes('edm:NavigationProperty', $namespaceManager))) {
+                $associationName = "$($navigationProperty.Relationship)"
+                $targetEntityType = $null
+                $multiplicity = $null
+                if ($associations.Contains($associationName)) {
+                    $targetEnd = @($associations[$associationName] | Where-Object { $_.role -eq "$($navigationProperty.ToRole)" })[0]
+                    if ($targetEnd) {
+                        $targetEntityType = $targetEnd.entityType
+                        $multiplicity = $targetEnd.multiplicity
+                    }
+                }
+
+                $navigationProperties += [pscustomobject]@{
+                    name             = "$($navigationProperty.Name)"
+                    relationship     = $associationName
+                    toRole           = "$($navigationProperty.ToRole)"
+                    fromRole         = "$($navigationProperty.FromRole)"
+                    targetEntityType = $targetEntityType
+                    multiplicity     = $multiplicity
+                }
+            }
+
+            $entities[$entityType.Name] = [pscustomobject]@{
+                name                 = "$($entityType.Name)"
+                keyProperties        = @($entityType.SelectNodes('edm:Key/edm:PropertyRef', $namespaceManager) | ForEach-Object { "$($_.Name)" })
+                properties           = $propertyNames
+                navigationProperties = $navigationProperties
+            }
+        }
+    }
+
+    $entitySets = [ordered]@{}
+    foreach ($schema in @($document.SelectNodes('//edm:Schema', $namespaceManager))) {
+        foreach ($entitySet in @($schema.SelectNodes('edm:EntityContainer/edm:EntitySet', $namespaceManager))) {
+            $entitySets[$entitySet.Name] = Get-SfEntityShortName -EntityName "$($entitySet.EntityType)"
+        }
+    }
+
+    return [pscustomobject]@{
+        entities   = [pscustomobject]$entities
+        entitySets = [pscustomobject]$entitySets
+    }
+}
+
+function Test-SfODataMetadataPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Schema,
+        [Parameter(Mandatory)]
+        [string]$EntitySetName,
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [ValidateSet('select', 'expand')]
+        [string]$PathType = 'select'
+    )
+
+    $rootEntityType = $Schema.entitySets.PSObject.Properties[$EntitySetName]
+    if (-not $rootEntityType) {
+        return [pscustomobject]@{
+            path              = $Path
+            pathType          = $PathType
+            isValid           = $false
+            entitySetName     = $EntitySetName
+            entityTypeName    = $null
+            resolvedEntityType = $null
+            resolvedProperty  = $null
+            failureSegment    = $EntitySetName
+            failureReason     = 'UnknownEntitySet'
+        }
+    }
+
+    $currentEntityTypeName = "$($rootEntityType.Value)"
+    $segments = @($Path -split '/' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    for ($index = 0; $index -lt $segments.Count; $index += 1) {
+        $segment = $segments[$index]
+        $entityDefinitionProperty = $Schema.entities.PSObject.Properties[$currentEntityTypeName]
+        if (-not $entityDefinitionProperty) {
+            return [pscustomobject]@{
+                path               = $Path
+                pathType           = $PathType
+                isValid            = $false
+                entitySetName      = $EntitySetName
+                entityTypeName     = $currentEntityTypeName
+                resolvedEntityType = $null
+                resolvedProperty   = $null
+                failureSegment     = $segment
+                failureReason      = 'UnknownEntityType'
+            }
+        }
+
+        $entityDefinition = $entityDefinitionProperty.Value
+        $navigationMatch = $entityDefinition.navigationProperties | Where-Object { $_.name -eq $segment } | Select-Object -First 1
+        $propertyMatch = $entityDefinition.properties | Where-Object { $_ -eq $segment } | Select-Object -First 1
+        $isLastSegment = $index -eq ($segments.Count - 1)
+
+        if ($navigationMatch) {
+            if ($isLastSegment -and $PathType -eq 'select') {
+                return [pscustomobject]@{
+                    path               = $Path
+                    pathType           = $PathType
+                    isValid            = $false
+                    entitySetName      = $EntitySetName
+                    entityTypeName     = $currentEntityTypeName
+                    resolvedEntityType = $navigationMatch.targetEntityType
+                    resolvedProperty   = $null
+                    failureSegment     = $segment
+                    failureReason      = 'SelectEndsOnNavigationProperty'
+                }
+            }
+
+            if ([string]::IsNullOrWhiteSpace($navigationMatch.targetEntityType)) {
+                return [pscustomobject]@{
+                    path               = $Path
+                    pathType           = $PathType
+                    isValid            = $false
+                    entitySetName      = $EntitySetName
+                    entityTypeName     = $currentEntityTypeName
+                    resolvedEntityType = $null
+                    resolvedProperty   = $null
+                    failureSegment     = $segment
+                    failureReason      = 'NavigationTargetUnknown'
+                }
+            }
+
+            $currentEntityTypeName = $navigationMatch.targetEntityType
+            continue
+        }
+
+        if ($propertyMatch) {
+            if (-not $isLastSegment) {
+                return [pscustomobject]@{
+                    path               = $Path
+                    pathType           = $PathType
+                    isValid            = $false
+                    entitySetName      = $EntitySetName
+                    entityTypeName     = $currentEntityTypeName
+                    resolvedEntityType = $currentEntityTypeName
+                    resolvedProperty   = $propertyMatch
+                    failureSegment     = $segment
+                    failureReason      = 'PropertyUsedAsIntermediateSegment'
+                }
+            }
+
+            return [pscustomobject]@{
+                path               = $Path
+                pathType           = $PathType
+                isValid            = $true
+                entitySetName      = $EntitySetName
+                entityTypeName     = $currentEntityTypeName
+                resolvedEntityType = $currentEntityTypeName
+                resolvedProperty   = $propertyMatch
+                failureSegment     = $null
+                failureReason      = $null
+            }
+        }
+
+        return [pscustomobject]@{
+            path               = $Path
+            pathType           = $PathType
+            isValid            = $false
+            entitySetName      = $EntitySetName
+            entityTypeName     = $currentEntityTypeName
+            resolvedEntityType = $null
+            resolvedProperty   = $null
+            failureSegment     = $segment
+            failureReason      = 'SegmentNotFound'
+        }
+    }
+
+    return [pscustomobject]@{
+        path               = $Path
+        pathType           = $PathType
+        isValid            = $true
+        entitySetName      = $EntitySetName
+        entityTypeName     = $currentEntityTypeName
+        resolvedEntityType = $currentEntityTypeName
+        resolvedProperty   = $null
+        failureSegment     = $null
+        failureReason      = $null
+    }
+}
+
+function Get-SfODataSchemaExport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Config,
+        [string[]]$EntityNames
+    )
+
+    $metadataXml = Get-SfODataMetadataXml -Config $Config
+    $schema = ConvertFrom-SfODataMetadataXml -MetadataXml $metadataXml
+    $queryDefinition = Get-SfQueryDefinition -Config $Config
+    $rootEntitySetName = "$($queryDefinition.entitySet)"
+
+    $selectedEntityNames = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @($EntityNames)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+
+        if (-not $selectedEntityNames.Contains($candidate)) {
+            $selectedEntityNames.Add($candidate)
+        }
+    }
+
+    if ($selectedEntityNames.Count -eq 0) {
+        foreach ($path in @($queryDefinition.select) + @($queryDefinition.expand)) {
+            $pathCheck = Test-SfODataMetadataPath -Schema $schema -EntitySetName $rootEntitySetName -Path $path -PathType $(if (@($queryDefinition.expand) -contains $path) { 'expand' } else { 'select' })
+            foreach ($entityName in @($pathCheck.entityTypeName, $pathCheck.resolvedEntityType)) {
+                if ([string]::IsNullOrWhiteSpace($entityName)) {
+                    continue
+                }
+
+                if (-not $selectedEntityNames.Contains($entityName)) {
+                    $selectedEntityNames.Add($entityName)
+                }
+            }
+        }
+
+        foreach ($defaultEntityName in @($schema.entitySets.PSObject.Properties[$rootEntitySetName].Value, 'PerPerson', 'EmpEmployment', 'EmpJob', 'PerPersonal', 'PerEmail', 'User')) {
+            if ([string]::IsNullOrWhiteSpace($defaultEntityName)) {
+                continue
+            }
+
+            if (-not $selectedEntityNames.Contains($defaultEntityName)) {
+                $selectedEntityNames.Add($defaultEntityName)
+            }
+        }
+    }
+
+    $entitySummaries = foreach ($entityName in $selectedEntityNames) {
+        $entityProperty = $schema.entities.PSObject.Properties[$entityName]
+        if (-not $entityProperty) {
+            [pscustomobject]@{
+                name                 = $entityName
+                exists               = $false
+                keyProperties        = @()
+                propertyCount        = 0
+                properties           = @()
+                navigationProperties = @()
+            }
+            continue
+        }
+
+        $entity = $entityProperty.Value
+        [pscustomobject]@{
+            name                 = $entityName
+            exists               = $true
+            keyProperties        = @($entity.keyProperties)
+            propertyCount        = @($entity.properties).Count
+            properties           = @($entity.properties | Sort-Object)
+            navigationProperties = @($entity.navigationProperties | Sort-Object name)
+        }
+    }
+
+    $pathValidations = @()
+    foreach ($path in @($queryDefinition.select)) {
+        $pathValidations += Test-SfODataMetadataPath -Schema $schema -EntitySetName $rootEntitySetName -Path $path -PathType 'select'
+    }
+    foreach ($path in @($queryDefinition.expand)) {
+        $pathValidations += Test-SfODataMetadataPath -Schema $schema -EntitySetName $rootEntitySetName -Path $path -PathType 'expand'
+    }
+
+    return [pscustomobject]@{
+        artifactType     = 'SchemaExport'
+        exportedAt       = (Get-Date).ToString('o')
+        metadataUri      = "$($Config.successFactors.baseUrl.TrimEnd('/'))/`$metadata"
+        entitySetName    = $rootEntitySetName
+        entityTypeName   = "$($schema.entitySets.PSObject.Properties[$rootEntitySetName].Value)"
+        configuredSelect = @($queryDefinition.select)
+        configuredExpand = @($queryDefinition.expand)
+        pathValidations  = $pathValidations
+        entities         = $entitySummaries
+        metadataXml      = $metadataXml
+    }
+}
+
 function Get-SfWorkers {
     [CmdletBinding()]
     param(
@@ -452,4 +808,4 @@ function Get-SfWorkerById {
     return $null
 }
 
-Export-ModuleMember -Function Get-SfOAuthToken, Get-SfAuthHeaders, Invoke-SfODataGet, Get-SfWorkers, Get-SfWorkerById
+Export-ModuleMember -Function Get-SfOAuthToken, Get-SfAuthHeaders, Invoke-SfODataGet, Get-SfODataMetadataXml, ConvertFrom-SfODataMetadataXml, Test-SfODataMetadataPath, Get-SfODataSchemaExport, Get-SfWorkers, Get-SfWorkerById

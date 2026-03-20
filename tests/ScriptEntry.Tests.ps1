@@ -325,6 +325,64 @@ param(
         $result.mappingCount | Should -Be 3
     }
 
+    It 'writes schema export files and returns their paths in json mode' {
+        $configPath = Join-Path $TestDrive 'schema-config.json'
+        $outputDirectory = Join-Path $TestDrive 'schema-output'
+        '{}' | Set-Content -Path $configPath
+
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/Config.psm1" -Force -DisableNameChecking
+        Import-Module "$PSScriptRoot/../src/Modules/SfAdSync/SuccessFactors.psm1" -Force -DisableNameChecking
+        Mock Get-SfAdSyncConfig {
+            [pscustomobject]@{
+                reporting = [pscustomobject]@{
+                    outputDirectory = (Join-Path $TestDrive 'reports')
+                }
+                successFactors = [pscustomobject]@{
+                    baseUrl = 'https://tenant.example.com/odata/v2'
+                }
+            }
+        }
+        Mock Get-SfODataSchemaExport {
+            [pscustomobject]@{
+                artifactType = 'SchemaExport'
+                exportedAt = '2026-03-20T12:00:00.0000000Z'
+                metadataUri = 'https://tenant.example.com/odata/v2/$metadata'
+                entitySetName = 'PerPerson'
+                entityTypeName = 'PerPerson'
+                configuredSelect = @('personIdExternal')
+                configuredExpand = @('employmentNav')
+                pathValidations = @(
+                    [pscustomobject]@{
+                        path = 'personIdExternal'
+                        pathType = 'select'
+                        isValid = $true
+                        failureReason = $null
+                        failureSegment = $null
+                    }
+                )
+                entities = @(
+                    [pscustomobject]@{
+                        name = 'PerPerson'
+                        exists = $true
+                        keyProperties = @('personIdExternal')
+                        propertyCount = 1
+                        properties = @('personIdExternal')
+                        navigationProperties = @()
+                    }
+                )
+                metadataXml = '<edmx:Edmx />'
+            }
+        }
+
+        $result = & "$PSScriptRoot/../scripts/Invoke-SfAdSchemaExport.ps1" -ConfigPath $configPath -OutputDirectory $outputDirectory -AsJson | ConvertFrom-Json -Depth 20
+
+        $result.artifactType | Should -Be 'SchemaExport'
+        $result.entitySetName | Should -Be 'PerPerson'
+        (Test-Path -Path $result.metadataPath -PathType Leaf) | Should -BeTrue
+        (Test-Path -Path $result.summaryPath -PathType Leaf) | Should -BeTrue
+        ((Get-Content -Path $result.metadataPath -Raw).Trim()) | Should -Be '<edmx:Edmx />'
+    }
+
     It 'requires three confirmations before deleting managed OU users and resetting sync state' {
         $configPath = Join-Path $TestDrive 'fresh-reset-config.json'
         $statePath = Join-Path $TestDrive 'fresh-reset-state.json'

@@ -352,4 +352,119 @@ Describe 'SuccessFactors module' {
             @(Get-SfWorkers -Config $global:SuccessFactorsTestConfig -Mode Full).Count | Should -Be 0
         }
     }
+
+    It 'parses metadata xml and validates configured property paths' {
+        InModuleScope SuccessFactors {
+            $metadataXml = @'
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="SFOData" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+      <EntityType Name="PerPerson">
+        <Key>
+          <PropertyRef Name="personIdExternal" />
+        </Key>
+        <Property Name="personIdExternal" Type="Edm.String" Nullable="false" />
+        <Property Name="firstName" Type="Edm.String" Nullable="true" />
+        <NavigationProperty Name="employmentNav" Relationship="SFOData.PerPersonEmployment" FromRole="PerPerson" ToRole="EmpEmployment" />
+      </EntityType>
+      <EntityType Name="EmpEmployment">
+        <Property Name="startDate" Type="Edm.DateTime" Nullable="true" />
+        <NavigationProperty Name="jobInfoNav" Relationship="SFOData.EmploymentJobInfo" FromRole="EmpEmployment" ToRole="EmpJob" />
+      </EntityType>
+      <EntityType Name="EmpJob">
+        <Property Name="department" Type="Edm.String" Nullable="true" />
+        <Property Name="company" Type="Edm.String" Nullable="true" />
+        <Property Name="employeeClass" Type="Edm.String" Nullable="true" />
+      </EntityType>
+      <Association Name="PerPersonEmployment">
+        <End Type="SFOData.PerPerson" Multiplicity="1" Role="PerPerson" />
+        <End Type="SFOData.EmpEmployment" Multiplicity="*" Role="EmpEmployment" />
+      </Association>
+      <Association Name="EmploymentJobInfo">
+        <End Type="SFOData.EmpEmployment" Multiplicity="1" Role="EmpEmployment" />
+        <End Type="SFOData.EmpJob" Multiplicity="*" Role="EmpJob" />
+      </Association>
+      <EntityContainer Name="SFOData">
+        <EntitySet Name="PerPerson" EntityType="SFOData.PerPerson" />
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
+'@
+
+            $schema = ConvertFrom-SfODataMetadataXml -MetadataXml $metadataXml
+            $schema.entitySets.PerPerson | Should -Be 'PerPerson'
+            $schema.entities.EmpJob.properties | Should -Contain 'department'
+            $schema.entities.PerPerson.navigationProperties[0].targetEntityType | Should -Be 'EmpEmployment'
+
+            $validPath = Test-SfODataMetadataPath -Schema $schema -EntitySetName 'PerPerson' -Path 'employmentNav/jobInfoNav/employeeClass' -PathType select
+            $missingPath = Test-SfODataMetadataPath -Schema $schema -EntitySetName 'PerPerson' -Path 'employmentNav/jobInfoNav/employmentType' -PathType select
+            $expandPath = Test-SfODataMetadataPath -Schema $schema -EntitySetName 'PerPerson' -Path 'employmentNav/jobInfoNav' -PathType expand
+
+            $validPath.isValid | Should -BeTrue
+            $validPath.resolvedEntityType | Should -Be 'EmpJob'
+            $missingPath.isValid | Should -BeFalse
+            $missingPath.failureSegment | Should -Be 'employmentType'
+            $missingPath.failureReason | Should -Be 'SegmentNotFound'
+            $expandPath.isValid | Should -BeTrue
+            $expandPath.resolvedEntityType | Should -Be 'EmpJob'
+        }
+    }
+
+    It 'exports schema metadata and configured path validation results' {
+        InModuleScope SuccessFactors {
+            $schemaConfig = [pscustomobject]@{
+                successFactors = [pscustomobject]@{
+                    baseUrl = 'https://tenant.example.com/odata/v2'
+                    query = [pscustomobject]@{
+                        entitySet = 'PerPerson'
+                        select = @('personIdExternal', 'employmentNav/jobInfoNav/employeeClass', 'employmentNav/jobInfoNav/employmentType')
+                        expand = @('employmentNav', 'employmentNav/jobInfoNav')
+                    }
+                }
+            }
+
+            Mock Get-SfODataMetadataXml {
+@'
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="SFOData" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+      <EntityType Name="PerPerson">
+        <Property Name="personIdExternal" Type="Edm.String" Nullable="false" />
+        <NavigationProperty Name="employmentNav" Relationship="SFOData.PerPersonEmployment" FromRole="PerPerson" ToRole="EmpEmployment" />
+      </EntityType>
+      <EntityType Name="EmpEmployment">
+        <NavigationProperty Name="jobInfoNav" Relationship="SFOData.EmploymentJobInfo" FromRole="EmpEmployment" ToRole="EmpJob" />
+      </EntityType>
+      <EntityType Name="EmpJob">
+        <Property Name="employeeClass" Type="Edm.String" Nullable="true" />
+      </EntityType>
+      <Association Name="PerPersonEmployment">
+        <End Type="SFOData.PerPerson" Multiplicity="1" Role="PerPerson" />
+        <End Type="SFOData.EmpEmployment" Multiplicity="*" Role="EmpEmployment" />
+      </Association>
+      <Association Name="EmploymentJobInfo">
+        <End Type="SFOData.EmpEmployment" Multiplicity="1" Role="EmpEmployment" />
+        <End Type="SFOData.EmpJob" Multiplicity="*" Role="EmpJob" />
+      </Association>
+      <EntityContainer Name="SFOData">
+        <EntitySet Name="PerPerson" EntityType="SFOData.PerPerson" />
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
+'@
+            }
+
+            $export = Get-SfODataSchemaExport -Config $schemaConfig
+
+            $export.artifactType | Should -Be 'SchemaExport'
+            $export.entitySetName | Should -Be 'PerPerson'
+            ($export.pathValidations | Where-Object { $_.path -eq 'employmentNav/jobInfoNav/employeeClass' }).isValid | Should -BeTrue
+            ($export.pathValidations | Where-Object { $_.path -eq 'employmentNav/jobInfoNav/employmentType' }).failureReason | Should -Be 'SegmentNotFound'
+            ($export.entities | Where-Object { $_.name -eq 'EmpJob' }).exists | Should -BeTrue
+        }
+    }
 }
