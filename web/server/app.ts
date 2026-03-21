@@ -1,6 +1,6 @@
 import express from 'express';
-import type { Express, Request, Response } from 'express';
-import type { DashboardStatus } from './types.js';
+import type { Express, Response } from 'express';
+import type { DashboardStatus, QueueName } from './types.js';
 import { PowerShellStatusProvider, type StatusProvider } from './status-provider.js';
 import { ReportService } from './report-service.js';
 
@@ -60,10 +60,34 @@ export function createApp(dependencies: AppDependencies): Express {
         workerId: asQueryString(request.query.workerId),
         reason: asQueryString(request.query.reason),
         filter: asQueryString(request.query.filter),
+        entryId: asQueryString(request.query.entryId),
       });
       response.json(result);
     } catch (error) {
       respondWithError(response, 404, 'Failed to load run entries.', error);
+    }
+  });
+
+  app.get('/api/queues/:queueName', async (request, response) => {
+    try {
+      const queueName = request.params.queueName as QueueName;
+      if (!['manual-review', 'quarantined', 'conflicts', 'guardrails'].includes(queueName)) {
+        respondWithError(response, 404, 'Unknown queue.', new Error(`Queue '${request.params.queueName}' is not supported.`));
+        return;
+      }
+
+      const status = await statusProvider.getStatus(dependencies.configPath, historyLimit);
+      const result = await reportService.getQueue(status, queueName, {
+        reason: asQueryString(request.query.reason),
+        reviewCaseType: asQueryString(request.query.reviewCaseType),
+        workerId: asQueryString(request.query.workerId),
+        filter: asQueryString(request.query.filter),
+        page: asQueryNumber(request.query.page),
+        pageSize: asQueryNumber(request.query.pageSize),
+      });
+      response.json(result);
+    } catch (error) {
+      respondWithError(response, 500, 'Failed to load queue entries.', error);
     }
   });
 
@@ -78,6 +102,20 @@ export function createApp(dependencies: AppDependencies): Express {
       response.json(result);
     } catch (error) {
       respondWithError(response, 500, 'Failed to load worker history.', error);
+    }
+  });
+
+  app.get('/api/workers/:workerId', async (request, response) => {
+    try {
+      const status = await statusProvider.getStatus(dependencies.configPath, historyLimit);
+      const result = await reportService.getWorkerDetail(
+        status,
+        request.params.workerId,
+        asQueryNumber(request.query.limit) ?? 100,
+      );
+      response.json(result);
+    } catch (error) {
+      respondWithError(response, 500, 'Failed to load worker detail.', error);
     }
   });
 

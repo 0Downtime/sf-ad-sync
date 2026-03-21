@@ -1,9 +1,9 @@
 :root {
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  color: #f3efe3;
+  color: #f4f1e8;
   background:
     radial-gradient(circle at top left, rgba(252, 193, 101, 0.16), transparent 24rem),
-    radial-gradient(circle at top right, rgba(111, 161, 255, 0.18), transparent 20rem),
+    radial-gradient(circle at 85% 15%, rgba(91, 156, 240, 0.18), transparent 21rem),
     linear-gradient(160deg, #14202f 0%, #0b1219 48%, #090d12 100%);
   line-height: 1.4;
   font-weight: 400;
@@ -33,9 +33,21 @@ input {
 
 .hero {
   display: grid;
-  grid-template-columns: 2.4fr 1fr;
+  grid-template-columns: 2.2fr 1fr;
   gap: 1.25rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.hero h1,
+.card h2,
+.selected-panel h3 {
+  margin: 0;
+  font-family: "IBM Plex Serif", Georgia, serif;
+}
+
+.hero h1 {
+  font-size: clamp(2rem, 3vw, 3.4rem);
+  max-width: 16ch;
 }
 
 .eyebrow,
@@ -47,20 +59,8 @@ input {
   color: #f4b04b;
 }
 
-.hero h1,
-.card h2,
-.selected-panel h3 {
-  margin: 0;
-  font-family: "IBM Plex Serif", Georgia, serif;
-}
-
-.hero h1 {
-  font-size: clamp(2rem, 3vw, 3.2rem);
-  max-width: 14ch;
-}
-
 .lede {
-  max-width: 55rem;
+  max-width: 58rem;
   color: #d0d8e4;
 }
 
@@ -73,14 +73,15 @@ input {
   backdrop-filter: blur(14px);
 }
 
-.hero-card {
-  padding: 1.25rem;
+.hero-card,
+.card,
+.warning-panel {
+  padding: 1rem 1.1rem;
 }
 
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
   border-radius: 999px;
   padding: 0.22rem 0.7rem;
   background: #f4b04b;
@@ -95,34 +96,100 @@ input {
   border: 1px solid rgba(244, 176, 75, 0.28);
 }
 
-.error-banner {
+.error-banner,
+.warning-panel {
   margin-bottom: 1rem;
-  padding: 0.85rem 1rem;
   border-radius: 0.85rem;
+}
+
+.error-banner {
+  padding: 0.85rem 1rem;
   background: rgba(203, 73, 73, 0.18);
   border: 1px solid rgba(233, 112, 112, 0.38);
+}
+
+.warning-panel {
+  background: rgba(244, 176, 75, 0.12);
+  border: 1px solid rgba(244, 176, 75, 0.24);
+}
+
+.warning-panel ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1rem;
+}
+
+.view-nav,
+.shortcut-row,
+.queue-tabs,
+.review-tabs,
+.toggle-row,
+.header-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.view-nav {
+  margin-bottom: 1rem;
+}
+
+.view-nav button,
+.queue-tabs button,
+.review-tabs button,
+.toggle-row button,
+.group-list button,
+.queue-item-actions button,
+.header-actions button {
+  border: 1px solid rgba(244, 176, 75, 0.24);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+.view-nav button.active,
+.queue-tabs button.active,
+.review-tabs button.active,
+.toggle-row button.active,
+.group-list button.active {
+  background: rgba(244, 176, 75, 0.16);
+  border-color: rgba(244, 176, 75, 0.55);
 }
 
 .status-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
 }
 
 .status-card,
 .current-run-card {
-  padding: 1.1rem;
+  min-height: 11rem;
 }
 
 .main-grid {
   display: grid;
-  grid-template-columns: minmax(20rem, 28rem) minmax(0, 1fr);
+  grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
   gap: 1rem;
 }
 
-.card {
-  padding: 1rem;
+.queue-grid {
+  display: grid;
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.worker-grid {
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.worker-history-card {
+  grid-column: 1 / -1;
 }
 
 .card-header {
@@ -134,7 +201,9 @@ input {
 }
 
 .runs-table,
-.entry-list {
+.entry-list,
+.queue-list,
+.group-list {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -142,34 +211,86 @@ input {
 
 .run-row,
 .entry-row,
-.bucket-tabs button {
+.queue-item {
   border: 1px solid transparent;
   border-radius: 0.9rem;
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.run-row,
+.entry-row {
   text-align: left;
   cursor: pointer;
-  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 
 .run-row:hover,
 .entry-row:hover,
-.bucket-tabs button:hover {
+.queue-item:hover {
   transform: translateY(-1px);
   border-color: rgba(244, 176, 75, 0.3);
 }
 
 .run-row.selected,
-.entry-row.selected,
-.bucket-tabs button.active {
+.entry-row.selected {
   border-color: rgba(244, 176, 75, 0.6);
   background: rgba(244, 176, 75, 0.12);
 }
 
-.run-row {
+.run-row,
+.entry-row {
   padding: 0.8rem;
   display: grid;
   gap: 0.25rem;
+}
+
+.queue-item {
+  padding: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.queue-item p,
+.queue-item small {
+  margin: 0.15rem 0 0;
+}
+
+.queue-item-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.pagination-controls {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pagination-controls span,
+.queue-count-copy,
+.queue-page-size label {
+  color: #c7d0de;
+  font-size: 0.92rem;
+}
+
+.queue-page-size {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 1rem;
+}
+
+.queue-page-size select {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(244, 176, 75, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 0.68rem 0.8rem;
 }
 
 .toolbar {
@@ -181,9 +302,9 @@ input {
   flex-wrap: wrap;
 }
 
-.toolbar input {
-  min-width: 18rem;
-  flex: 1;
+.toolbar input,
+.queue-sidebar input {
+  width: 100%;
   border-radius: 0.75rem;
   border: 1px solid rgba(244, 176, 75, 0.22);
   background: rgba(255, 255, 255, 0.04);
@@ -198,7 +319,16 @@ input {
 }
 
 .bucket-tabs button {
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
   padding: 0.55rem 0.8rem;
+}
+
+.bucket-tabs button.active {
+  border-color: rgba(244, 176, 75, 0.55);
+  background: rgba(244, 176, 75, 0.12);
 }
 
 .detail-summary {
@@ -223,12 +353,6 @@ input {
   display: grid;
   grid-template-columns: minmax(17rem, 22rem) minmax(0, 1fr);
   gap: 1rem;
-}
-
-.entry-row {
-  padding: 0.75rem;
-  display: grid;
-  gap: 0.16rem;
 }
 
 .selected-panel {
@@ -264,16 +388,41 @@ input {
 .operator-panel,
 .changes-panel,
 .history-panel,
-.review-strip {
+.review-strip,
+.group-panel {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .operator-panel ul,
-.changes-panel ul,
 .history-panel ul {
   padding-left: 1rem;
+}
+
+.changes-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.diff-table th,
+.diff-table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  text-align: left;
+  vertical-align: top;
+}
+
+.diff-table tr.changed td {
+  background: rgba(244, 176, 75, 0.08);
 }
 
 .empty-state {
@@ -286,6 +435,8 @@ input {
   .hero,
   .status-grid,
   .main-grid,
+  .queue-grid,
+  .worker-grid,
   .detail-content,
   .detail-summary {
     grid-template-columns: 1fr;
@@ -293,9 +444,5 @@ input {
 
   .app-shell {
     padding: 1rem;
-  }
-
-  .toolbar input {
-    min-width: 0;
   }
 }

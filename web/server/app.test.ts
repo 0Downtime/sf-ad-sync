@@ -1,6 +1,7 @@
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApp, createMockStatusProvider } from './app.js';
+import { ReportService } from './report-service.js';
 
 const dashboardStatus = {
   configPath: '/tmp/config.json',
@@ -60,18 +61,32 @@ const dashboardStatus = {
 };
 
 describe('web api', () => {
-  it('returns dashboard status', async () => {
+  it('returns dashboard status and new queue/worker endpoints', async () => {
+    const reportService = {
+      listRuns: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 25, warnings: [] })),
+      getRun: vi.fn(async () => ({ run: dashboardStatus.latestRun, report: {}, bucketCounts: {}, warnings: [], reviewExplorer: { created: 0, changed: 0, deleted: 0 } })),
+      getRunEntries: vi.fn(async () => ({ run: dashboardStatus.latestRun, entries: [], total: 0, warnings: [] })),
+      getQueue: vi.fn(async () => ({ queueName: 'manual-review', entries: [], total: 0, page: 1, pageSize: 25, reasonGroups: [], reviewCaseGroups: [], artifactGroups: [], warnings: [] })),
+      getWorkerHistory: vi.fn(async () => ({ workerId: '1001', entries: [], warnings: [] })),
+      getWorkerDetail: vi.fn(async () => ({ workerId: '1001', trackedWorker: null, latestEntry: null, relatedEntries: [], relatedRuns: [], warnings: [] })),
+    } as unknown as ReportService;
+
     const app = createApp({
       configPath: '/tmp/config.json',
       statusProvider: createMockStatusProvider({
         ...dashboardStatus,
         recentRuns: [dashboardStatus.latestRun],
       }),
+      reportService,
     });
 
-    const response = await request(app).get('/api/status');
+    const statusResponse = await request(app).get('/api/status');
+    const queueResponse = await request(app).get('/api/queues/manual-review');
+    const workerResponse = await request(app).get('/api/workers/1001');
 
-    expect(response.status).toBe(200);
-    expect(response.body.status.latestRun.runId).toBe('run-1');
+    expect(statusResponse.status).toBe(200);
+    expect(statusResponse.body.status.latestRun.runId).toBe('run-1');
+    expect(queueResponse.status).toBe(200);
+    expect(workerResponse.status).toBe(200);
   });
 });

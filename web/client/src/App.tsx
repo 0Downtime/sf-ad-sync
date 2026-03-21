@@ -1,35 +1,29 @@
-import { useEffect, useMemo, useState } from 'react';
-import { getRun, getRunEntries, getStatus, getWorkerHistory } from './api.js';
-import type { DashboardStatus, EntryListResponse, EntryRecord, RunDetailResponse, WorkerHistoryResponse } from './types.js';
-
-const BUCKET_ORDER = [
-  'quarantined',
-  'conflicts',
-  'manualReview',
-  'guardrailFailures',
-  'creates',
-  'updates',
-  'enables',
-  'disables',
-  'graveyardMoves',
-  'deletions',
-  'unchanged',
-];
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getQueue, getRun, getRunEntries, getStatus, getWorkerDetail } from './api.js';
+import { BUCKET_ORDER, chooseSelectedEntry, DEFAULT_ROUTE, getRouteState, mapReviewExplorerToBucket, normalizeRoute, resolveActiveBucket, stepSelection, syncRouteState } from './route-state.js';
+import type { RouteState } from './route-state.js';
+import { CurrentRunPanel, StatusPanel, SummaryPanel, WarningPanel } from './triage-components.js';
+import { DashboardView, QueueView, WorkerView } from './triage-views.js';
+import type { DashboardStatus, EntryListResponse, EntryRecord, QueueResponse, RunDetailResponse, WorkerDetailResponse } from './types.js';
 
 export function App() {
   const [status, setStatus] = useState<DashboardStatus | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selectedBucket, setSelectedBucket] = useState<string>('quarantined');
+  const [route, setRoute] = useState<RouteState>(() => getRouteState());
   const [runDetail, setRunDetail] = useState<RunDetailResponse | null>(null);
   const [entryResponse, setEntryResponse] = useState<EntryListResponse | null>(null);
-  const [selectedEntryIndex, setSelectedEntryIndex] = useState(0);
-  const [workerHistory, setWorkerHistory] = useState<WorkerHistoryResponse | null>(null);
-  const [filterText, setFilterText] = useState('');
+  const [queueResponse, setQueueResponse] = useState<QueueResponse | null>(null);
+  const [workerDetail, setWorkerDetail] = useState<WorkerDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const filterInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const onPopState = () => setRoute(getRouteState());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-
     const loadStatus = async () => {
       try {
         const nextStatus = await getStatus();
@@ -38,7 +32,13 @@ export function App() {
         }
 
         setStatus(nextStatus);
-        setSelectedRunId((current) => current ?? nextStatus.recentRuns[0]?.runId ?? null);
+        setRoute((current) => {
+          const nextRunId = current.runId ?? nextStatus.recentRuns[0]?.runId ?? null;
+          const nextWorkerId = current.workerId ?? nextStatus.recentRuns[0]?.workerScope?.workerId ?? null;
+          const next = { ...current, runId: nextRunId, workerId: nextWorkerId };
+          syncRouteState(next);
+          return next;
+        });
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard status.');
@@ -55,7 +55,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedRunId) {
+    if (!route.runId) {
+      setRunDetail(null);
+      setEntryResponse(null);
       return;
     }
 
@@ -63,8 +65,12 @@ export function App() {
     void (async () => {
       try {
         const [nextRunDetail, nextEntries] = await Promise.all([
-          getRun(selectedRunId),
-          getRunEntries(selectedRunId, { bucket: selectedBucket, filter: filterText }),
+          getRun(route.runId),
+          getRunEntries(route.runId, {
+            bucket: resolveActiveBucket(route.bucket, route.reviewExplorer),
+            filter: route.filter || undefined,
+            entryId: route.entryId || undefined,
+          }),
         ]);
         if (cancelled) {
           return;
@@ -72,7 +78,14 @@ export function App() {
 
         setRunDetail(nextRunDetail);
         setEntryResponse(nextEntries);
-        setSelectedEntryIndex(0);
+        const resolvedEntry = chooseSelectedEntry(nextEntries.entries, route.entryId);
+        if (resolvedEntry && resolvedEntry.entryId !== route.entryId) {
+          const nextRoute = { ...route, entryId: resolvedEntry.entryId, workerId: resolvedEntry.workerId ?? route.workerId };
+          setRouteAndUrl(nextRoute, false);
+        } else if (!resolvedEntry && nextEntries.entries[0]) {
+          const nextRoute = { ...route, entryId: nextEntries.entries[0].entryId, workerId: nextEntries.entries[0].workerId ?? route.workerId };
+          setRouteAndUrl(nextRoute, false);
+        }
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load run detail.');
@@ -83,26 +96,31 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedRunId, selectedBucket, filterText]);
-
-  const selectedEntry = entryResponse?.entries[selectedEntryIndex] ?? null;
+  }, [route.runId, route.bucket, route.filter, route.entryId, route.reviewExplorer]);
 
   useEffect(() => {
-    if (!selectedEntry?.workerId) {
-      setWorkerHistory(null);
+    if (route.view !== 'queues') {
+      setQueueResponse(null);
       return;
     }
 
     let cancelled = false;
     void (async () => {
       try {
-        const nextHistory = await getWorkerHistory(selectedEntry.workerId!);
+        const nextQueue = await getQueue(route.queueName, {
+          reason: route.reason || undefined,
+          reviewCaseType: route.reviewCaseType || undefined,
+          workerId: route.workerId || undefined,
+          filter: route.filter || undefined,
+          page: route.page,
+          pageSize: route.pageSize,
+        });
         if (!cancelled) {
-          setWorkerHistory(nextHistory);
+          setQueueResponse(nextQueue);
         }
-      } catch {
+      } catch (loadError) {
         if (!cancelled) {
-          setWorkerHistory(null);
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load queue.');
         }
       }
     })();
@@ -110,48 +128,120 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedEntry?.workerId]);
+  }, [route.view, route.queueName, route.reason, route.reviewCaseType, route.workerId, route.filter, route.page, route.pageSize]);
+
+  useEffect(() => {
+    if (route.view !== 'worker' || !route.workerId) {
+      setWorkerDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const nextWorker = await getWorkerDetail(route.workerId);
+        if (!cancelled) {
+          setWorkerDetail(nextWorker);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load worker detail.');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [route.view, route.workerId]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === '/') {
+        event.preventDefault();
+        filterInputRef.current?.focus();
+        filterInputRef.current?.select();
+        return;
+      }
+
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) {
+        return;
+      }
+
+      if (event.key === 'g') {
+        event.preventDefault();
+        navigateTo({ ...route, view: 'dashboard' });
+      } else if (event.key === 'q') {
+        event.preventDefault();
+        navigateTo({ ...route, view: 'queues' });
+      } else if (event.key === 'w' && route.workerId) {
+        event.preventDefault();
+        navigateTo({ ...route, view: 'worker' });
+      } else if (event.key === 'j' || event.key === 'k') {
+        event.preventDefault();
+        if (route.view === 'dashboard' && entryResponse?.entries?.length) {
+          const nextEntry = stepSelection(entryResponse.entries, route.entryId, event.key === 'j' ? 1 : -1);
+          if (nextEntry) {
+            navigateTo({ ...route, entryId: nextEntry.entryId, workerId: nextEntry.workerId ?? route.workerId }, false);
+          }
+        }
+      } else if (route.view === 'queues' && event.key === 'n' && queueResponse && route.page < Math.ceil(queueResponse.total / route.pageSize)) {
+        event.preventDefault();
+        navigateTo({ ...route, page: route.page + 1 });
+      } else if (route.view === 'queues' && event.key === 'p' && route.page > 1) {
+        event.preventDefault();
+        navigateTo({ ...route, page: route.page - 1 });
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [route, entryResponse, queueResponse]);
+
+  const selectedEntry = useMemo(
+    () => chooseSelectedEntry(entryResponse?.entries ?? [], route.entryId),
+    [entryResponse?.entries, route.entryId],
+  );
 
   const runBuckets = useMemo(() => {
     if (!runDetail) {
       return [];
     }
 
-    return BUCKET_ORDER.filter((bucket) => (runDetail.bucketCounts[bucket] ?? 0) > 0)
-      .map((bucket) => ({
-        bucket,
-        count: runDetail.bucketCounts[bucket] ?? 0,
-      }));
+    return BUCKET_ORDER.filter((bucket) => (runDetail.bucketCounts[bucket] ?? 0) > 0).map((bucket) => ({
+      bucket,
+      count: runDetail.bucketCounts[bucket] ?? 0,
+    }));
   }, [runDetail]);
-
-  useEffect(() => {
-    if (runBuckets.length === 0) {
-      return;
-    }
-
-    if (!runBuckets.some((entry) => entry.bucket === selectedBucket)) {
-      setSelectedBucket(runBuckets[0].bucket);
-    }
-  }, [runBuckets, selectedBucket]);
 
   return (
     <div className="app-shell">
       <header className="hero">
         <div>
           <p className="eyebrow">SyncFactors Web Dashboard</p>
-          <h1>Read-only operator view for runtime status, reports, and manual review.</h1>
+          <h1>Operator triage in the browser, with queue views, worker drill-down, and deep links.</h1>
           <p className="lede">
-            Localhost-only v1. Browser visibility replaces the TUI read path; PowerShell remains the source of truth for sync execution.
+            Read-only and localhost-only. The browser now optimizes investigation work instead of mirroring raw report buckets.
           </p>
         </div>
         <div className="hero-card">
           <span className="badge">Read-only</span>
           <p>{status?.paths.configPath ?? 'Loading config path...'}</p>
           <p>{status?.paths.reportDirectory ?? 'Waiting for report directory...'}</p>
+          <div className="shortcut-row">
+            Shortcuts: <span>`g` dashboard</span><span>`q` queues</span><span>`w` worker</span><span>`/` filter</span><span>`n` next page</span><span>`p` prev page</span>
+          </div>
         </div>
       </header>
 
       {error ? <section className="error-banner">{error}</section> : null}
+      {status?.warnings?.length ? <WarningPanel title="Status warnings" warnings={status.warnings} /> : null}
+
+      <nav className="view-nav">
+        <button className={route.view === 'dashboard' ? 'active' : ''} onClick={() => navigateTo({ ...route, view: 'dashboard' })} type="button">Dashboard</button>
+        <button className={route.view === 'queues' ? 'active' : ''} onClick={() => navigateTo({ ...route, view: 'queues' })} type="button">Queues</button>
+        <button className={route.view === 'worker' ? 'active' : ''} onClick={() => navigateTo({ ...route, view: 'worker' })} type="button" disabled={!route.workerId}>Worker</button>
+      </nav>
 
       <section className="status-grid">
         <StatusPanel title="SuccessFactors" health={status?.health.successFactors} />
@@ -160,239 +250,60 @@ export function App() {
         <CurrentRunPanel currentRun={status?.currentRun ?? null} />
       </section>
 
-      <main className="main-grid">
-        <section className="card runs-card">
-          <div className="card-header">
-            <div>
-              <p className="section-kicker">Run History</p>
-              <h2>Recent runs</h2>
-            </div>
-          </div>
-          <div className="runs-table">
-            {status?.recentRuns.map((run) => (
-              <button
-                key={run.runId ?? run.path ?? Math.random()}
-                className={`run-row ${selectedRunId === run.runId ? 'selected' : ''}`}
-                onClick={() => setSelectedRunId(run.runId)}
-                type="button"
-              >
-                <span>{run.status ?? 'Unknown'}</span>
-                <span>{run.mode ?? '-'}</span>
-                <span>{run.artifactType}</span>
-                <span>{run.startedAt ?? '-'}</span>
-                <span>C {run.creates} / U {run.updates} / MR {run.manualReview}</span>
-              </button>
-            )) ?? <p>No recent runs.</p>}
-          </div>
-        </section>
+      {route.view === 'dashboard' ? (
+        <DashboardView
+          status={status}
+          route={route}
+          runDetail={runDetail}
+          entryResponse={entryResponse}
+          selectedEntry={selectedEntry}
+          runBuckets={runBuckets}
+          filterInputRef={filterInputRef}
+          onSelectRun={(runId) => navigateTo({ ...route, view: 'dashboard', runId, entryId: null })}
+          onSelectBucket={(bucket) => navigateTo({ ...route, bucket, entryId: null })}
+          onFilterChange={(filter) => navigateTo({ ...route, filter })}
+          onSelectEntry={(entry) => navigateTo({ ...route, entryId: entry.entryId, workerId: entry.workerId ?? route.workerId }, false)}
+          onChangeDiffMode={(diffMode) => navigateTo({ ...route, diffMode }, false)}
+          onChangeReviewExplorer={(reviewExplorer) =>
+            navigateTo({ ...route, reviewExplorer, bucket: mapReviewExplorerToBucket(reviewExplorer), entryId: null })
+          }
+          onOpenWorker={(workerId) => navigateTo({ ...route, view: 'worker', workerId })}
+        />
+      ) : null}
 
-        <section className="card detail-card">
-          <div className="card-header">
-            <div>
-              <p className="section-kicker">Run Detail</p>
-              <h2>{runDetail?.run.runId ?? 'Select a run'}</h2>
-            </div>
-            {runDetail?.run ? <span className="badge ghost">{runDetail.run.artifactType}</span> : null}
-          </div>
+      {route.view === 'queues' ? (
+        <QueueView
+          route={route}
+          queueResponse={queueResponse}
+          filterInputRef={filterInputRef}
+          onQueueChange={(queueName) => navigateTo({ ...route, queueName, reason: '', reviewCaseType: '', workerId: null, page: 1 })}
+          onFilterChange={(filter) => navigateTo({ ...route, filter, page: 1 })}
+          onReasonChange={(reason) => navigateTo({ ...route, reason, page: 1 })}
+          onReviewCaseChange={(reviewCaseType) => navigateTo({ ...route, reviewCaseType, page: 1 })}
+          onPageChange={(page) => navigateTo({ ...route, page })}
+          onPageSizeChange={(pageSize) => navigateTo({ ...route, pageSize, page: 1 })}
+          onOpenWorker={(workerId) => navigateTo({ ...route, view: 'worker', workerId })}
+          onOpenRun={(entry) => navigateTo({ ...route, view: 'dashboard', runId: entry.runId, bucket: entry.bucket, entryId: entry.entryId, workerId: entry.workerId })}
+        />
+      ) : null}
 
-          {runDetail?.run ? (
-            <>
-              <div className="detail-summary">
-                <SummaryMetric label="Mode" value={runDetail.run.mode ?? '-'} />
-                <SummaryMetric label="Status" value={runDetail.run.status ?? '-'} />
-                <SummaryMetric label="Duration" value={runDetail.run.durationSeconds?.toString() ?? '-'} />
-                <SummaryMetric label="Manual review" value={runDetail.run.manualReview.toString()} />
-              </div>
-
-              <div className="toolbar">
-                <div className="bucket-tabs">
-                  {runBuckets.map(({ bucket, count }) => (
-                    <button
-                      key={bucket}
-                      type="button"
-                      className={selectedBucket === bucket ? 'active' : ''}
-                      onClick={() => setSelectedBucket(bucket)}
-                    >
-                      {bucket} ({count})
-                    </button>
-                  ))}
-                </div>
-                <input
-                  aria-label="Filter entries"
-                  placeholder="Filter by worker, reason, or category"
-                  value={filterText}
-                  onChange={(event) => setFilterText(event.target.value)}
-                />
-              </div>
-
-              <div className="detail-content">
-                <div className="entry-list">
-                  {(entryResponse?.entries ?? []).map((entry, index) => (
-                    <button
-                      key={`${entry.bucket}-${entry.workerId ?? index}-${index}`}
-                      type="button"
-                      className={`entry-row ${selectedEntryIndex === index ? 'selected' : ''}`}
-                      onClick={() => setSelectedEntryIndex(index)}
-                    >
-                      <strong>{entry.workerId ?? 'Unknown worker'}</strong>
-                      <span>{entry.bucketLabel}</span>
-                      <span>{entry.reason ?? entry.reviewCategory ?? 'No reason provided'}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <SelectedEntryPanel entry={selectedEntry} workerHistory={workerHistory} run={runDetail} />
-              </div>
-
-              {runDetail.run.mode === 'Review' ? (
-                <section className="review-strip">
-                  <h3>Report explorer</h3>
-                  <p>
-                    Created {runDetail.bucketCounts.creates ?? 0} | Changed {runDetail.bucketCounts.updates ?? 0} | Deleted {runDetail.bucketCounts.deletions ?? 0}
-                  </p>
-                </section>
-              ) : null}
-            </>
-          ) : (
-            <p className="empty-state">Choose a run to inspect report buckets and selected-object details.</p>
-          )}
-        </section>
-      </main>
+      {route.view === 'worker' ? (
+        <WorkerView
+          route={route}
+          workerDetail={workerDetail}
+          onOpenRun={(entry) => navigateTo({ ...route, view: 'dashboard', runId: entry.runId, bucket: entry.bucket, entryId: entry.entryId, workerId: entry.workerId })}
+        />
+      ) : null}
     </div>
   );
-}
 
-function StatusPanel({ title, health }: { title: string; health?: { status: string; detail: string } }) {
-  return (
-    <section className="card status-card">
-      <p className="section-kicker">{title}</p>
-      <h2>{health?.status ?? 'UNKNOWN'}</h2>
-      <p>{health?.detail ?? 'Waiting for probe details.'}</p>
-    </section>
-  );
-}
-
-function SummaryPanel({ status }: { status: DashboardStatus | null }) {
-  return (
-    <section className="card status-card">
-      <p className="section-kicker">State Summary</p>
-      <h2>{status?.summary.totalTrackedWorkers ?? 0} tracked workers</h2>
-      <p>
-        Suppressed {status?.summary.suppressedWorkers ?? 0} | Pending deletion {status?.summary.pendingDeletionWorkers ?? 0}
-      </p>
-      <p>Checkpoint {status?.summary.lastCheckpoint ?? 'none'}</p>
-    </section>
-  );
-}
-
-function CurrentRunPanel({ currentRun }: { currentRun: Record<string, unknown> | null }) {
-  return (
-    <section className="card current-run-card">
-      <p className="section-kicker">Current Run</p>
-      <h2>{`${currentRun?.status ?? 'Idle'} / ${currentRun?.stage ?? 'Completed'}`}</h2>
-      <p>{`${currentRun?.lastAction ?? 'No active sync run.'}`}</p>
-      <p>
-        Progress {`${currentRun?.processedWorkers ?? 0}`} / {`${currentRun?.totalWorkers ?? 0}`} | Worker {`${currentRun?.currentWorkerId ?? '-'}`}
-      </p>
-    </section>
-  );
-}
-
-function SummaryMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function SelectedEntryPanel({
-  entry,
-  workerHistory,
-  run,
-}: {
-  entry: EntryRecord | null;
-  workerHistory: WorkerHistoryResponse | null;
-  run: RunDetailResponse | null;
-}) {
-  if (!entry) {
-    return <div className="selected-panel empty-state">No entry selected for this bucket.</div>;
+  function navigateTo(nextRoute: RouteState, push = true) {
+    setRouteAndUrl(nextRoute, push);
   }
 
-  const changedAttributes =
-    (Array.isArray(entry.item.changedAttributeDetails) ? entry.item.changedAttributeDetails : []) as Array<Record<string, unknown>>;
-
-  return (
-    <div className="selected-panel">
-      <div className="selected-header">
-        <div>
-          <p className="section-kicker">Selected Object</p>
-          <h3>{entry.workerId ?? entry.samAccountName ?? 'Unknown object'}</h3>
-        </div>
-        <span className="badge">{entry.bucketLabel}</span>
-      </div>
-
-      <dl className="detail-list">
-        <DetailRow label="Reason" value={entry.reason ?? '-'} />
-        <DetailRow label="Review category" value={entry.reviewCategory ?? '-'} />
-        <DetailRow label="Review case" value={entry.reviewCaseType ?? '-'} />
-        <DetailRow label="SamAccountName" value={entry.samAccountName ?? '-'} />
-        <DetailRow label="Target OU" value={entry.targetOu ?? '-'} />
-        <DetailRow label="Current DN" value={entry.currentDistinguishedName ?? '-'} />
-      </dl>
-
-      {entry.operatorActionSummary ? (
-        <section className="operator-panel">
-          <h4>Manual review workflow</h4>
-          <p>{entry.operatorActionSummary}</p>
-          {entry.operatorActions.length > 0 ? (
-            <ul>
-              {entry.operatorActions.map((action, index) => (
-                <li key={`${action.code ?? action.label ?? index}`}>
-                  <strong>{action.label ?? action.code ?? 'Action'}</strong>: {action.description ?? 'No description provided.'}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-      ) : null}
-
-      {changedAttributes.length > 0 ? (
-        <section className="changes-panel">
-          <h4>Changed attributes</h4>
-          <ul>
-            {changedAttributes.slice(0, 8).map((row, index) => (
-              <li key={`${row.targetAttribute ?? index}`}>
-                <strong>{`${row.targetAttribute ?? 'attribute'}`}</strong>: {`${row.currentAdValue ?? '(unset)'}`} → {`${row.proposedValue ?? '(unset)'}`}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {workerHistory?.entries?.length ? (
-        <section className="history-panel">
-          <h4>Worker view</h4>
-          <p>{workerHistory.entries.length} related entries across recent reports.</p>
-          <ul>
-            {workerHistory.entries.slice(0, 5).map((historyEntry, index) => (
-              <li key={`${historyEntry.runId ?? index}-${index}`}>
-                {historyEntry.bucketLabel} · {historyEntry.reason ?? historyEntry.reviewCategory ?? 'No reason'} · {historyEntry.runId ?? run?.run.runId ?? '-'}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </>
-  );
+  function setRouteAndUrl(nextRoute: RouteState, push: boolean) {
+    const normalized = normalizeRoute(nextRoute, status);
+    setRoute(normalized);
+    syncRouteState(normalized, push);
+  }
 }

@@ -1,4 +1,12 @@
-import type { DashboardStatus, EntryListResponse, RunDetailResponse, WorkerHistoryResponse } from './types.js';
+import type {
+  DashboardStatus,
+  EntryListResponse,
+  QueueName,
+  QueueResponse,
+  RunDetailResponse,
+  WorkerDetailResponse,
+  WorkerHistoryResponse,
+} from './types.js';
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
@@ -21,20 +29,38 @@ export async function getRun(runId: string): Promise<RunDetailResponse> {
 
 export async function getRunEntries(
   runId: string,
-  query: { bucket?: string; filter?: string } = {},
+  query: { bucket?: string; filter?: string; workerId?: string; reason?: string; entryId?: string } = {},
 ): Promise<EntryListResponse> {
   const params = new URLSearchParams();
-  if (query.bucket) {
-    params.set('bucket', query.bucket);
-  }
-  if (query.filter) {
-    params.set('filter', query.filter);
+  for (const [key, value] of Object.entries(query)) {
+    if (value) {
+      params.set(key, value);
+    }
   }
 
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return fetchJson<EntryListResponse>(`/api/runs/${encodeURIComponent(runId)}/entries${suffix}`);
 }
 
+export async function getQueue(
+  queueName: QueueName,
+  query: { reason?: string; reviewCaseType?: string; workerId?: string; filter?: string; page?: number; pageSize?: number } = {},
+): Promise<QueueResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return fetchJson<QueueResponse>(`/api/queues/${encodeURIComponent(queueName)}${suffix}`);
+}
+
 export async function getWorkerHistory(workerId: string): Promise<WorkerHistoryResponse> {
   return fetchJson<WorkerHistoryResponse>(`/api/workers/${encodeURIComponent(workerId)}/history`);
+}
+
+export async function getWorkerDetail(workerId: string): Promise<WorkerDetailResponse> {
+  return fetchJson<WorkerDetailResponse>(`/api/workers/${encodeURIComponent(workerId)}`);
 }

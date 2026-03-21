@@ -1,0 +1,321 @@
+import type { DashboardStatus, EntryListResponse, EntryRecord, QueueName, QueueResponse, RunDetailResponse, WorkerDetailResponse } from './types.js';
+import type { RouteState } from './route-state.js';
+import { mapReviewExplorerToBucket } from './route-state.js';
+import { CopyLinkButton, DetailRow, GroupPanel, SelectedEntryPanel, SummaryMetric, WarningPanel } from './triage-components.js';
+import type { FilterRef } from './triage-components.js';
+
+export function DashboardView(props: {
+  status: DashboardStatus | null;
+  route: RouteState;
+  runDetail: RunDetailResponse | null;
+  entryResponse: EntryListResponse | null;
+  selectedEntry: EntryRecord | null;
+  runBuckets: Array<{ bucket: string; count: number }>;
+  filterInputRef: FilterRef;
+  onSelectRun: (runId: string | null) => void;
+  onSelectBucket: (bucket: string) => void;
+  onFilterChange: (filter: string) => void;
+  onSelectEntry: (entry: EntryRecord) => void;
+  onChangeDiffMode: (mode: 'changed' | 'all') => void;
+  onChangeReviewExplorer: (mode: 'changed' | 'created' | 'deleted') => void;
+  onOpenWorker: (workerId: string) => void;
+}) {
+  const { status, route, runDetail, entryResponse, selectedEntry, runBuckets, filterInputRef } = props;
+  return (
+    <main className="main-grid">
+      <section className="card runs-card">
+        <div className="card-header">
+          <div>
+            <p className="section-kicker">Run History</p>
+            <h2>Recent runs</h2>
+          </div>
+          <CopyLinkButton label="Copy run view link" />
+        </div>
+        <div className="runs-table">
+          {status?.recentRuns.map((run) => (
+            <button
+              key={run.runId ?? run.path ?? 'run'}
+              className={`run-row ${route.runId === run.runId ? 'selected' : ''}`}
+              onClick={() => props.onSelectRun(run.runId)}
+              type="button"
+            >
+              <strong>{run.status ?? 'Unknown'}</strong>
+              <span>{run.mode ?? '-'}</span>
+              <span>{run.artifactType}</span>
+              <span>{run.startedAt ?? '-'}</span>
+              <span>C {run.creates} / U {run.updates} / MR {run.manualReview}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="card detail-card">
+        <div className="card-header">
+          <div>
+            <p className="section-kicker">Run Detail</p>
+            <h2>{runDetail?.run.runId ?? 'Select a run'}</h2>
+          </div>
+          <div className="header-actions">
+            {runDetail?.run ? <span className="badge ghost">{runDetail.run.artifactType}</span> : null}
+            <CopyLinkButton label="Copy detail link" />
+          </div>
+        </div>
+
+        {runDetail?.warnings?.length ? <WarningPanel title="Run warnings" warnings={runDetail.warnings} /> : null}
+
+        {runDetail?.run ? (
+          <>
+            <div className="detail-summary">
+              <SummaryMetric label="Mode" value={runDetail.run.mode ?? '-'} />
+              <SummaryMetric label="Status" value={runDetail.run.status ?? '-'} />
+              <SummaryMetric label="Duration" value={runDetail.run.durationSeconds?.toString() ?? '-'} />
+              <SummaryMetric label="Manual review" value={runDetail.run.manualReview.toString()} />
+            </div>
+
+            {runDetail.run.mode === 'Review' ? (
+              <section className="review-strip">
+                <div className="review-tabs">
+                  {(['changed', 'created', 'deleted'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={route.reviewExplorer === mode ? 'active' : ''}
+                      onClick={() => props.onChangeReviewExplorer(mode)}
+                    >
+                      {mode} ({runDetail.reviewExplorer[mode]})
+                    </button>
+                  ))}
+                </div>
+                <p>Review explorer prioritizes created, changed, and deleted-style triage instead of raw bucket order.</p>
+              </section>
+            ) : null}
+
+            <div className="toolbar">
+              <div className="bucket-tabs">
+                {runBuckets.map(({ bucket, count }) => (
+                  <button
+                    key={bucket}
+                    type="button"
+                    className={route.bucket === bucket ? 'active' : ''}
+                    onClick={() => props.onSelectBucket(bucket)}
+                  >
+                    {bucket} ({count})
+                  </button>
+                ))}
+              </div>
+              <input
+                ref={filterInputRef}
+                aria-label="Filter entries"
+                placeholder="Filter by worker, reason, or category"
+                value={route.filter}
+                onChange={(event) => props.onFilterChange(event.target.value)}
+              />
+            </div>
+
+            <div className="detail-content">
+              <div className="entry-list">
+                {(entryResponse?.entries ?? []).map((entry) => (
+                  <button
+                    key={entry.entryId}
+                    type="button"
+                    className={`entry-row ${route.entryId === entry.entryId ? 'selected' : ''}`}
+                    onClick={() => props.onSelectEntry(entry)}
+                  >
+                    <strong>{entry.workerId ?? 'Unknown worker'}</strong>
+                    <span>{entry.bucketLabel}</span>
+                    <span>{entry.reason ?? entry.reviewCategory ?? 'No reason provided'}</span>
+                    <span>{entry.staleDays !== null ? `${entry.staleDays}d stale` : 'fresh'}</span>
+                  </button>
+                ))}
+              </div>
+
+              <SelectedEntryPanel
+                entry={selectedEntry}
+                diffMode={route.diffMode}
+                onDiffModeChange={props.onChangeDiffMode}
+                onOpenWorker={props.onOpenWorker}
+              />
+            </div>
+          </>
+        ) : (
+          <p className="empty-state">Choose a run to inspect report buckets and selected-object details.</p>
+        )}
+      </section>
+    </main>
+  );
+}
+
+export function QueueView(props: {
+  route: RouteState;
+  queueResponse: QueueResponse | null;
+  filterInputRef: FilterRef;
+  onQueueChange: (queue: QueueName) => void;
+  onFilterChange: (filter: string) => void;
+  onReasonChange: (reason: string) => void;
+  onReviewCaseChange: (reviewCaseType: string) => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  onOpenWorker: (workerId: string) => void;
+  onOpenRun: (entry: EntryRecord) => void;
+}) {
+  const { route, queueResponse, filterInputRef } = props;
+  const start = queueResponse ? Math.min((queueResponse.page - 1) * queueResponse.pageSize + 1, queueResponse.total) : 0;
+  const end = queueResponse ? Math.min(queueResponse.page * queueResponse.pageSize, queueResponse.total) : 0;
+  const totalPages = queueResponse ? Math.max(Math.ceil(queueResponse.total / queueResponse.pageSize), 1) : 1;
+
+  return (
+    <main className="queue-grid">
+      <section className="card queue-sidebar">
+        <div className="card-header">
+          <div>
+            <p className="section-kicker">Queues</p>
+            <h2>Exception triage</h2>
+          </div>
+          <CopyLinkButton label="Copy queue link" />
+        </div>
+        <div className="queue-tabs">
+          {(['manual-review', 'quarantined', 'conflicts', 'guardrails'] as QueueName[]).map((queueName) => (
+            <button key={queueName} type="button" className={route.queueName === queueName ? 'active' : ''} onClick={() => props.onQueueChange(queueName)}>
+              {queueName}
+            </button>
+          ))}
+        </div>
+        <input
+          ref={filterInputRef}
+          aria-label="Queue filter"
+          placeholder="Filter queue"
+          value={route.filter}
+          onChange={(event) => props.onFilterChange(event.target.value)}
+        />
+        <div className="queue-page-size">
+          <label htmlFor="queue-page-size">Page size</label>
+          <select
+            id="queue-page-size"
+            aria-label="Queue page size"
+            value={route.pageSize}
+            onChange={(event) => props.onPageSizeChange(Number(event.target.value))}
+          >
+            {[10, 25, 50].map((size) => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
+        </div>
+        <GroupPanel title="Reasons" groups={queueResponse?.reasonGroups ?? []} activeKey={route.reason} onSelect={props.onReasonChange} />
+        <GroupPanel title="Review cases" groups={queueResponse?.reviewCaseGroups ?? []} activeKey={route.reviewCaseType} onSelect={props.onReviewCaseChange} />
+        <GroupPanel title="Artifacts" groups={queueResponse?.artifactGroups ?? []} activeKey="" onSelect={() => undefined} disabled />
+      </section>
+
+      <section className="card queue-results">
+        <div className="card-header">
+          <div>
+            <p className="section-kicker">Queue Results</p>
+            <h2>{queueResponse?.total ?? 0} matching entries</h2>
+            <p className="queue-count-copy">
+              {queueResponse?.total ? `Showing ${start}-${end} of ${queueResponse.total}` : 'No entries matched this queue view.'}
+            </p>
+          </div>
+          <QueuePagination
+            page={route.page}
+            pageSize={route.pageSize}
+            totalPages={totalPages}
+            disabled={!queueResponse || queueResponse.total === 0}
+            onPageChange={props.onPageChange}
+          />
+        </div>
+        {queueResponse?.warnings?.length ? <WarningPanel title="Queue warnings" warnings={queueResponse.warnings} /> : null}
+        <div className="queue-list">
+          {(queueResponse?.entries ?? []).map((entry) => (
+            <div className="queue-item" key={entry.entryId}>
+              <div>
+                <strong>{entry.workerId ?? 'Unknown worker'}</strong>
+                <p>{entry.reason ?? entry.reviewCaseType ?? entry.bucketLabel}</p>
+                <small>{entry.artifactType} · {entry.bucketLabel} · {entry.staleDays !== null ? `${entry.staleDays}d stale` : 'fresh'}</small>
+              </div>
+              <div className="queue-item-actions">
+                {entry.workerId ? <button type="button" onClick={() => props.onOpenWorker(entry.workerId!)}>Worker</button> : null}
+                <button type="button" onClick={() => props.onOpenRun(entry)}>Run</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export function WorkerView(props: { route: RouteState; workerDetail: WorkerDetailResponse | null; onOpenRun: (entry: EntryRecord) => void }) {
+  const { route, workerDetail } = props;
+  return (
+    <main className="worker-grid">
+      <section className="card worker-summary">
+        <div className="card-header">
+          <div>
+            <p className="section-kicker">Worker</p>
+            <h2>{route.workerId ?? 'No worker selected'}</h2>
+          </div>
+          <CopyLinkButton label="Copy worker link" />
+        </div>
+        {workerDetail?.trackedWorker ? (
+          <dl className="detail-list">
+            <DetailRow label="Suppressed" value={String(Boolean(workerDetail.trackedWorker.suppressed))} />
+            <DetailRow label="DN" value={workerDetail.trackedWorker.distinguishedName ?? '-'} />
+            <DetailRow label="Delete after" value={workerDetail.trackedWorker.deleteAfter ?? '-'} />
+            <DetailRow label="Last seen status" value={workerDetail.trackedWorker.lastSeenStatus ?? '-'} />
+          </dl>
+        ) : (
+          <p className="empty-state">No tracked state is available for this worker.</p>
+        )}
+      </section>
+
+      <section className="card worker-latest">
+        <div className="card-header">
+          <div>
+            <p className="section-kicker">Latest Selected Detail</p>
+            <h2>{workerDetail?.latestEntry?.bucketLabel ?? 'No related entries'}</h2>
+          </div>
+        </div>
+        <SelectedEntryPanel entry={workerDetail?.latestEntry ?? null} diffMode="changed" onDiffModeChange={() => undefined} onOpenWorker={() => undefined} compact />
+      </section>
+
+      <section className="card worker-history-card">
+        <div className="card-header">
+          <div>
+            <p className="section-kicker">Related Runs</p>
+            <h2>{workerDetail?.relatedRuns.length ?? 0} runs</h2>
+          </div>
+        </div>
+        <div className="queue-list">
+          {(workerDetail?.relatedEntries ?? []).map((entry) => (
+            <div className="queue-item" key={entry.entryId}>
+              <div>
+                <strong>{entry.bucketLabel}</strong>
+                <p>{entry.reason ?? entry.reviewCategory ?? entry.groupLabel}</p>
+                <small>{entry.runId ?? '-'} · {entry.startedAt ?? '-'} · {entry.changeCount} changes</small>
+              </div>
+              <div className="queue-item-actions">
+                <button type="button" onClick={() => props.onOpenRun(entry)}>Open run</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {workerDetail?.warnings?.length ? <WarningPanel title="Worker warnings" warnings={workerDetail.warnings} /> : null}
+      </section>
+    </main>
+  );
+}
+
+function QueuePagination(props: {
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  disabled: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <div className="pagination-controls">
+      <button type="button" onClick={() => props.onPageChange(props.page - 1)} disabled={props.disabled || props.page <= 1}>Previous</button>
+      <span>Page {props.page} of {props.totalPages}</span>
+      <button type="button" onClick={() => props.onPageChange(props.page + 1)} disabled={props.disabled || props.page >= props.totalPages}>Next</button>
+    </div>
+  );
+}

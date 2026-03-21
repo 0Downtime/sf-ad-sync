@@ -46,7 +46,7 @@ export type DashboardStatus = {
     successFactors: HealthStatus;
     activeDirectory: HealthStatus;
   };
-  trackedWorkers: Array<Record<string, unknown>>;
+  trackedWorkers: TrackedWorker[];
   context: Record<string, unknown>;
   paths: {
     configPath: string;
@@ -59,24 +59,54 @@ export type DashboardStatus = {
   warnings?: string[];
 };
 
+export type TrackedWorker = {
+  workerId: string;
+  adObjectGuid?: string | null;
+  distinguishedName?: string | null;
+  suppressed?: boolean;
+  firstDisabledAt?: string | null;
+  deleteAfter?: string | null;
+  lastSeenStatus?: string | null;
+};
+
 export type OperatorAction = {
   code?: string;
   label?: string;
   description?: string;
 };
 
+export type DiffRow = {
+  attribute: string;
+  source: string | null;
+  before: string;
+  after: string;
+  changed: boolean;
+};
+
+export type OperationSummary = {
+  action: string;
+  effect: string | null;
+  targetOu: string | null;
+  fromOu: string | null;
+  toOu: string | null;
+};
+
 export type EntryRecord = {
+  entryId: string;
   runId: string | null;
   reportPath: string | null;
   artifactType: string;
   mode: string | null;
   bucket: string;
   bucketLabel: string;
+  queueName: QueueName | null;
   workerId: string | null;
   samAccountName: string | null;
   reason: string | null;
   reviewCategory: string | null;
   reviewCaseType: string | null;
+  groupKey: string;
+  groupLabel: string;
   operatorActionSummary: string | null;
   operatorActions: OperatorAction[];
   targetOu: string | null;
@@ -85,6 +115,10 @@ export type EntryRecord = {
   proposedEnable: boolean | null;
   matchedExistingUser: boolean | null;
   changeCount: number;
+  startedAt: string | null;
+  staleDays: number | null;
+  operationSummary: OperationSummary | null;
+  diffRows: DiffRow[];
   item: Record<string, unknown>;
 };
 
@@ -92,6 +126,12 @@ export type RunDetailResponse = {
   run: RunSummary;
   report: Record<string, unknown>;
   bucketCounts: Record<string, number>;
+  warnings: string[];
+  reviewExplorer: {
+    created: number;
+    changed: number;
+    deleted: number;
+  };
 };
 
 export type EntryListResponse = {
@@ -101,8 +141,37 @@ export type EntryListResponse = {
   warnings: string[];
 };
 
+export type QueueName = 'manual-review' | 'quarantined' | 'conflicts' | 'guardrails';
+
+export type QueueGroup = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+export type QueueResponse = {
+  queueName: QueueName;
+  entries: EntryRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  reasonGroups: QueueGroup[];
+  reviewCaseGroups: QueueGroup[];
+  artifactGroups: QueueGroup[];
+  warnings: string[];
+};
+
 export type WorkerHistoryResponse = {
   workerId: string;
   entries: EntryRecord[];
+  warnings: string[];
+};
+
+export type WorkerDetailResponse = {
+  workerId: string;
+  trackedWorker: TrackedWorker | null;
+  latestEntry: EntryRecord | null;
+  relatedEntries: EntryRecord[];
+  relatedRuns: RunSummary[];
   warnings: string[];
 };
