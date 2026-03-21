@@ -15,6 +15,9 @@ coverage.xml
 artifacts/
 .tools/gitleaks/
 .tools/gitleaks-scan/
+node_modules/
+web/dist/
+web/.vite/
 
 state/runtime/
 reports/output/

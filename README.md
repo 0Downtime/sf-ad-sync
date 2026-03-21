@@ -71,10 +71,12 @@ Planned work is ordered by delivery priority so the roadmap is easy to scan from
 - `scripts/Register-SyncFactorsScheduledTask.ps1`: scheduled task bootstrap.
 - `scripts/Get-SyncFactorsStatus.ps1`: summary view of the latest sync report and runtime state.
 - `scripts/Watch-SyncFactorsMonitor.ps1`: terminal dashboard for current sync stage and recent run history.
+- `scripts/Get-SyncFactorsWebStatus.ps1`: PowerShell adapter for the local web dashboard status API.
 - `scripts/Invoke-SyncFactorsWorkerPreview.ps1`: preview one worker and print the mapped diff against the current AD user.
 - `scripts/Install-SyncFactorsTerminalCommand.ps1`: installs the `syncfactors` terminal command for launching the dashboard from any shell.
 - `scripts/Invoke-TestSuite.ps1`: run the Pester test suite.
 - `scripts/Undo-SyncFactorsRun.ps1`: rollback one sync run using the recorded operation journal.
+- `web`: local read-only web dashboard frontend and API.
 - `tests`: Pester tests for config and mapping behavior.
 
 ## Setup
@@ -197,6 +199,20 @@ pwsh ./scripts/Watch-SyncFactorsMonitor.ps1 `
 ```
 
 Press `q` to quit, `r` to refresh immediately, or `t` to pause/resume auto-refresh. Start paused with `-PauseAutoRefresh` if you want to browse the dashboard without timed redraws. The dashboard shortcuts now cover the full run set: `d` delta dry-run, `s` delta sync, `f` full dry-run, `a` full sync, `v` review, `w` single-worker preview, and `z` fresh reset. The `w` shortcut now asks whether to run a `minimal` or `full` worker preview before it launches. The `z` shortcut launches the fresh sync reset script, which still requires three typed confirmations before any deletion happens. Any shortcut that can write anything, including reports, temp exports, or the clipboard, now requires typing `YES` before it proceeds.
+
+To launch the new localhost-only read-only web dashboard:
+
+```bash
+npm install --cache /tmp/syncfactors-npm-cache
+npm run web:dev -- --config ./config/local.real-successfactors.real-ad.sync-config.json
+```
+
+The dev server binds to `127.0.0.1:4280` by default and reads the same runtime status and report directories that the TUI uses. To build the frontend bundle for a local production-style run:
+
+```bash
+npm run web:build
+npm run web:start -- --config ./config/local.real-successfactors.real-ad.sync-config.json
+```
 
 To run the full Pester suite:
 

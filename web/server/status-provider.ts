@@ -1,0 +1,46 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import type { DashboardStatus } from './types.js';
+
+const execFileAsync = promisify(execFile);
+
+export interface StatusProvider {
+  getStatus(configPath: string, historyLimit: number): Promise<DashboardStatus>;
+}
+
+export class PowerShellStatusProvider implements StatusProvider {
+  private readonly cache = new Map<string, { expiresAt: number; value: DashboardStatus }>();
+
+  constructor(private readonly ttlMs = 5000) {}
+
+  async getStatus(configPath: string, historyLimit: number): Promise<DashboardStatus> {
+    const cacheKey = `${configPath}:${historyLimit}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
+    const { stdout } = await execFileAsync(
+      'pwsh',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-File',
+        'scripts/Get-SyncFactorsWebStatus.ps1',
+        '-ConfigPath',
+        configPath,
+        '-HistoryLimit',
+        String(historyLimit),
+        '-AsJson',
+      ],
+      {
+        cwd: process.cwd(),
+        maxBuffer: 1024 * 1024 * 10,
+      },
+    );
+
+    const value = JSON.parse(stdout) as DashboardStatus;
+    this.cache.set(cacheKey, { expiresAt: Date.now() + this.ttlMs, value });
+    return value;
+  }
+}
