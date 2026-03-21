@@ -61,15 +61,15 @@ export function App() {
       return;
     }
 
+    const runId = route.runId;
     let cancelled = false;
     void (async () => {
       try {
         const [nextRunDetail, nextEntries] = await Promise.all([
-          getRun(route.runId),
-          getRunEntries(route.runId, {
+          getRun(runId),
+          getRunEntries(runId, {
             bucket: resolveActiveBucket(route.bucket, route.reviewExplorer),
             filter: route.filter || undefined,
-            entryId: route.entryId || undefined,
           }),
         ]);
         if (cancelled) {
@@ -96,7 +96,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [route.runId, route.bucket, route.filter, route.entryId, route.reviewExplorer]);
+  }, [route.runId, route.bucket, route.filter, route.reviewExplorer]);
 
   useEffect(() => {
     if (route.view !== 'queues') {
@@ -136,10 +136,11 @@ export function App() {
       return;
     }
 
+    const workerId = route.workerId;
     let cancelled = false;
     void (async () => {
       try {
-        const nextWorker = await getWorkerDetail(route.workerId);
+        const nextWorker = await getWorkerDetail(workerId);
         if (!cancelled) {
           setWorkerDetail(nextWorker);
         }
@@ -217,19 +218,12 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="hero">
-        <div>
-          <p className="eyebrow">SyncFactors Web Dashboard</p>
-          <h1>Operator triage in the browser, with queue views, worker drill-down, and deep links.</h1>
-          <p className="lede">
-            Read-only and localhost-only. The browser now optimizes investigation work instead of mirroring raw report buckets.
-          </p>
-        </div>
-        <div className="hero-card">
-          <span className="badge">Read-only</span>
-          <p>{status?.paths.configPath ?? 'Loading config path...'}</p>
-          <p>{status?.paths.reportDirectory ?? 'Waiting for report directory...'}</p>
-          <div className="shortcut-row">
-            Shortcuts: <span>`g` dashboard</span><span>`q` queues</span><span>`w` worker</span><span>`/` filter</span><span>`n` next page</span><span>`p` prev page</span>
+        <div className="hero-inline">
+          <p className="eyebrow">SyncFactors Operator UI</p>
+          <div className="hero-meta">
+            <span className="badge">Read-only</span>
+            <span>{status?.paths.reportDirectory ?? 'Waiting for report directory...'}</span>
+            <span className="shortcut-row"><span>`g`</span><span>`q`</span><span>`w`</span><span>`/`</span><span>`n`</span><span>`p`</span></span>
           </div>
         </div>
       </header>
@@ -260,7 +254,12 @@ export function App() {
           runBuckets={runBuckets}
           filterInputRef={filterInputRef}
           onSelectRun={(runId) => navigateTo({ ...route, view: 'dashboard', runId, entryId: null })}
-          onSelectBucket={(bucket) => navigateTo({ ...route, bucket, entryId: null })}
+          onSelectBucket={(bucket) => navigateTo({
+            ...route,
+            bucket,
+            reviewExplorer: bucket === 'creates' ? 'created' : bucket === 'deletions' ? 'deleted' : 'changed',
+            entryId: null,
+          })}
           onFilterChange={(filter) => navigateTo({ ...route, filter })}
           onSelectEntry={(entry) => navigateTo({ ...route, entryId: entry.entryId, workerId: entry.workerId ?? route.workerId }, false)}
           onChangeDiffMode={(diffMode) => navigateTo({ ...route, diffMode }, false)}

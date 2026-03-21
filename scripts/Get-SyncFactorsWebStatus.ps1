@@ -224,13 +224,17 @@ $health = [pscustomobject]@{
     activeDirectory = [pscustomobject]@{ status = 'UNKNOWN'; detail = 'Health probe unavailable.' }
 }
 
-try {
-    $fullStatus = & $getSyncFactorsMonitorStatus -ConfigPath $resolvedConfigPath -HistoryLimit $HistoryLimit
-    if ($fullStatus -and $fullStatus.PSObject.Properties.Name -contains 'health' -and $fullStatus.health) {
-        $health = $fullStatus.health
+if ($IsWindows) {
+    try {
+        $fullStatus = & $getSyncFactorsMonitorStatus -ConfigPath $resolvedConfigPath -HistoryLimit $HistoryLimit
+        if ($fullStatus -and $fullStatus.PSObject.Properties.Name -contains 'health' -and $fullStatus.health) {
+            $health = $fullStatus.health
+        }
+    } catch {
+        $warnings.Add("Health probe unavailable: $($_.Exception.Message)")
     }
-} catch {
-    $warnings.Add("Health probe unavailable: $($_.Exception.Message)")
+} else {
+    $warnings.Add('Health probes are skipped on non-Windows hosts for the web dashboard.')
 }
 
 $suppressedWorkers = @($workerEntries | Where-Object { $_.suppressed })

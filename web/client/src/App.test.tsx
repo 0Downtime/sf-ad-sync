@@ -140,11 +140,38 @@ beforeEach(() => {
     reviewExplorer: { created: 1, changed: 1, deleted: 1 },
   });
 
-  mockGetRunEntries.mockResolvedValue({
-    run: { runId: 'run-1' },
-    total: 1,
-    warnings: [],
-    entries: [
+  mockGetRunEntries.mockImplementation(async (_runId: string, query?: { bucket?: string }) => {
+    const entries = [
+      {
+        entryId: 'run-1:creates:1000:0',
+        bucket: 'creates',
+        bucketLabel: 'Creates',
+        queueName: null,
+        workerId: '1000',
+        samAccountName: 'newuser',
+        reason: null,
+        reviewCategory: 'NewUser',
+        reviewCaseType: null,
+        groupKey: 'newuser::workerpreview',
+        groupLabel: 'NewUser',
+        operatorActionSummary: 'Create account newuser',
+        operatorActions: [],
+        targetOu: 'OU=Employees,DC=example,DC=com',
+        currentDistinguishedName: null,
+        currentEnabled: null,
+        proposedEnable: true,
+        matchedExistingUser: false,
+        changeCount: 1,
+        startedAt: '2026-03-20T10:00:00Z',
+        staleDays: 0,
+        operationSummary: { action: 'Create account newuser', effect: 'New account.', targetOu: 'OU=Employees,DC=example,DC=com', fromOu: null, toOu: null },
+        diffRows: [],
+        artifactType: 'WorkerPreview',
+        mode: 'Review',
+        reportPath: '/tmp/run-1.json',
+        runId: 'run-1',
+        item: {},
+      },
       {
         entryId: 'run-1:updates:1001:0',
         bucket: 'updates',
@@ -177,7 +204,45 @@ beforeEach(() => {
         runId: 'run-1',
         item: {},
       },
-    ],
+      {
+        entryId: 'run-1:deletions:1002:0',
+        bucket: 'deletions',
+        bucketLabel: 'Deletions',
+        queueName: null,
+        workerId: '1002',
+        samAccountName: 'retireduser',
+        reason: 'NoLongerInSource',
+        reviewCategory: null,
+        reviewCaseType: null,
+        groupKey: 'nolongerinsource::workerpreview',
+        groupLabel: 'NoLongerInSource',
+        operatorActionSummary: 'Delete account retireduser',
+        operatorActions: [],
+        targetOu: null,
+        currentDistinguishedName: 'CN=Retired User',
+        currentEnabled: false,
+        proposedEnable: false,
+        matchedExistingUser: true,
+        changeCount: 1,
+        startedAt: '2026-03-20T10:00:00Z',
+        staleDays: 2,
+        operationSummary: { action: 'Delete account retireduser', effect: 'Delete account.', targetOu: null, fromOu: null, toOu: null },
+        diffRows: [],
+        artifactType: 'WorkerPreview',
+        mode: 'Review',
+        reportPath: '/tmp/run-1.json',
+        runId: 'run-1',
+        item: {},
+      },
+    ];
+
+    const filtered = query?.bucket ? entries.filter((entry) => entry.bucket === query.bucket) : entries;
+    return {
+      run: { runId: 'run-1' },
+      total: filtered.length,
+      warnings: [],
+      entries: filtered,
+    };
   });
 
   mockGetQueue.mockImplementation(async (_queueName: string, query?: { page?: number; pageSize?: number }) => {
@@ -350,8 +415,13 @@ describe('App', () => {
   it('renders dashboard, queue, and worker triage views with url-backed state', async () => {
     render(<App />);
 
-    await waitFor(() => expect(screen.getByText(/Operator triage/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/SyncFactors Operator UI/i)).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText(/Structured diff/i)).toBeInTheDocument());
+    expect(mockGetRunEntries).toHaveBeenCalledWith('run-1', expect.not.objectContaining({ bucket: expect.anything(), entryId: expect.anything() }));
+    expect(screen.getByRole('button', { name: 'all (3)' })).toBeInTheDocument();
+    expect(screen.getAllByText('1000').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1001').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1002').length).toBeGreaterThan(0);
     expect(window.location.search).toMatch(/run=run-1/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Queues' }));

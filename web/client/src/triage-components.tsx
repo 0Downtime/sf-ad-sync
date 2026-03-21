@@ -1,6 +1,44 @@
 import type { MutableRefObject } from 'react';
 import type { DashboardStatus, EntryRecord, QueueGroup } from './types.js';
 
+export function getToneForBucket(bucket: string | null | undefined): string {
+  switch (bucket) {
+    case 'creates':
+      return 'create';
+    case 'updates':
+      return 'update';
+    case 'deletions':
+      return 'delete';
+    case 'quarantined':
+      return 'quarantine';
+    case 'manualReview':
+    case 'manual-review':
+      return 'review';
+    case 'conflicts':
+      return 'conflict';
+    case 'guardrailFailures':
+    case 'guardrails':
+      return 'guardrail';
+    case 'unchanged':
+      return 'neutral';
+    default:
+      return 'default';
+  }
+}
+
+export function getToneForReviewExplorer(mode: 'all' | 'changed' | 'created' | 'deleted'): string {
+  switch (mode) {
+    case 'all':
+      return 'all';
+    case 'changed':
+      return 'update';
+    case 'created':
+      return 'create';
+    case 'deleted':
+      return 'delete';
+  }
+}
+
 export function SelectedEntryPanel(props: {
   entry: EntryRecord | null;
   diffMode: 'changed' | 'all';
@@ -15,14 +53,14 @@ export function SelectedEntryPanel(props: {
 
   const visibleDiffRows = diffMode === 'all' ? entry.diffRows : entry.diffRows.filter((row) => row.changed);
   return (
-    <div className="selected-panel">
+    <div className="selected-panel" data-tone={getToneForBucket(entry.bucket)}>
       <div className="selected-header">
         <div>
           <p className="section-kicker">Selected Object</p>
           <h3>{entry.workerId ?? entry.samAccountName ?? 'Unknown object'}</h3>
         </div>
         <div className="header-actions">
-          <span className="badge">{entry.bucketLabel}</span>
+          <span className="badge" data-tone={getToneForBucket(entry.bucket)}>{entry.bucketLabel}</span>
           {entry.workerId && !compact ? <button type="button" onClick={() => onOpenWorker(entry.workerId!)}>Worker page</button> : null}
         </div>
       </div>

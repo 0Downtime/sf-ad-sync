@@ -13,7 +13,7 @@ export type RouteState = {
   reviewCaseType: string;
   workerId: string | null;
   diffMode: 'changed' | 'all';
-  reviewExplorer: 'changed' | 'created' | 'deleted';
+  reviewExplorer: 'all' | 'changed' | 'created' | 'deleted';
   page: number;
   pageSize: number;
 };
@@ -29,7 +29,7 @@ export const DEFAULT_ROUTE: RouteState = {
   reviewCaseType: '',
   workerId: null,
   diffMode: 'changed',
-  reviewExplorer: 'changed',
+  reviewExplorer: 'all',
   page: 1,
   pageSize: 25,
 };
@@ -81,7 +81,7 @@ export function syncRouteState(route: RouteState, push = false) {
   if (route.reviewCaseType) params.set('reviewCaseType', route.reviewCaseType);
   if (route.workerId) params.set('workerId', route.workerId);
   if (route.diffMode !== 'changed') params.set('diff', route.diffMode);
-  if (route.reviewExplorer !== 'changed') params.set('reviewExplorer', route.reviewExplorer);
+  if (route.reviewExplorer !== DEFAULT_ROUTE.reviewExplorer) params.set('reviewExplorer', route.reviewExplorer);
   if (route.page !== DEFAULT_ROUTE.page) params.set('page', String(route.page));
   if (route.pageSize !== DEFAULT_ROUTE.pageSize) params.set('pageSize', String(route.pageSize));
   const url = `${window.location.pathname}?${params.toString()}`;
@@ -118,7 +118,10 @@ export function stepSelection(entries: EntryRecord[], currentEntryId: string | n
   return entries[nextIndex] ?? null;
 }
 
-export function resolveActiveBucket(bucket: string, reviewExplorer: 'changed' | 'created' | 'deleted'): string {
+export function resolveActiveBucket(bucket: string, reviewExplorer: 'all' | 'changed' | 'created' | 'deleted'): string | undefined {
+  if (reviewExplorer === 'all') {
+    return undefined;
+  }
   if (reviewExplorer === 'created') {
     return 'creates';
   }
@@ -128,7 +131,10 @@ export function resolveActiveBucket(bucket: string, reviewExplorer: 'changed' | 
   return bucket;
 }
 
-export function mapReviewExplorerToBucket(mode: 'changed' | 'created' | 'deleted'): string {
+export function mapReviewExplorerToBucket(mode: 'all' | 'changed' | 'created' | 'deleted'): string {
+  if (mode === 'all') {
+    return 'updates';
+  }
   if (mode === 'created') {
     return 'creates';
   }
@@ -152,11 +158,11 @@ function parseQueueName(value: string | null): QueueName {
   return 'manual-review';
 }
 
-function parseReviewExplorer(value: string | null): 'changed' | 'created' | 'deleted' {
-  if (value === 'created' || value === 'deleted') {
+function parseReviewExplorer(value: string | null): 'all' | 'changed' | 'created' | 'deleted' {
+  if (value === 'all' || value === 'created' || value === 'deleted') {
     return value;
   }
-  return 'changed';
+  return DEFAULT_ROUTE.reviewExplorer;
 }
 
 function parsePositiveInt(value: string | null): number | null {

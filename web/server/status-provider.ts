@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { DashboardStatus } from './types.js';
@@ -10,6 +13,7 @@ export interface StatusProvider {
 
 export class PowerShellStatusProvider implements StatusProvider {
   private readonly cache = new Map<string, { expiresAt: number; value: DashboardStatus }>();
+  private readonly isolatedHome = path.join(os.tmpdir(), 'syncfactors-web-pwsh-home');
 
   constructor(private readonly ttlMs = 5000) {}
 
@@ -19,6 +23,13 @@ export class PowerShellStatusProvider implements StatusProvider {
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
+
+    fs.mkdirSync(this.isolatedHome, { recursive: true });
+    const pwshEnv = {
+      ...process.env,
+      HOME: this.isolatedHome,
+      XDG_CACHE_HOME: path.join(this.isolatedHome, '.cache'),
+    };
 
     const { stdout } = await execFileAsync(
       'pwsh',
@@ -35,6 +46,7 @@ export class PowerShellStatusProvider implements StatusProvider {
       ],
       {
         cwd: process.cwd(),
+        env: pwshEnv,
         maxBuffer: 1024 * 1024 * 10,
       },
     );

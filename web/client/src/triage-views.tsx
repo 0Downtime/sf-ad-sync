@@ -1,7 +1,7 @@
 import type { DashboardStatus, EntryListResponse, EntryRecord, QueueName, QueueResponse, RunDetailResponse, WorkerDetailResponse } from './types.js';
 import type { RouteState } from './route-state.js';
 import { mapReviewExplorerToBucket } from './route-state.js';
-import { CopyLinkButton, DetailRow, GroupPanel, SelectedEntryPanel, SummaryMetric, WarningPanel } from './triage-components.js';
+import { CopyLinkButton, DetailRow, GroupPanel, SelectedEntryPanel, SummaryMetric, WarningPanel, getToneForBucket, getToneForReviewExplorer } from './triage-components.js';
 import type { FilterRef } from './triage-components.js';
 
 export function DashboardView(props: {
@@ -17,7 +17,7 @@ export function DashboardView(props: {
   onFilterChange: (filter: string) => void;
   onSelectEntry: (entry: EntryRecord) => void;
   onChangeDiffMode: (mode: 'changed' | 'all') => void;
-  onChangeReviewExplorer: (mode: 'changed' | 'created' | 'deleted') => void;
+  onChangeReviewExplorer: (mode: 'all' | 'changed' | 'created' | 'deleted') => void;
   onOpenWorker: (workerId: string) => void;
 }) {
   const { status, route, runDetail, entryResponse, selectedEntry, runBuckets, filterInputRef } = props;
@@ -75,14 +75,15 @@ export function DashboardView(props: {
             {runDetail.run.mode === 'Review' ? (
               <section className="review-strip">
                 <div className="review-tabs">
-                  {(['changed', 'created', 'deleted'] as const).map((mode) => (
+                  {(['all', 'changed', 'created', 'deleted'] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
                       className={route.reviewExplorer === mode ? 'active' : ''}
+                      data-tone={getToneForReviewExplorer(mode)}
                       onClick={() => props.onChangeReviewExplorer(mode)}
                     >
-                      {mode} ({runDetail.reviewExplorer[mode]})
+                      {mode} ({mode === 'all' ? runDetail.reviewExplorer.changed + runDetail.reviewExplorer.created + runDetail.reviewExplorer.deleted : runDetail.reviewExplorer[mode]})
                     </button>
                   ))}
                 </div>
@@ -97,6 +98,7 @@ export function DashboardView(props: {
                     key={bucket}
                     type="button"
                     className={route.bucket === bucket ? 'active' : ''}
+                    data-tone={getToneForBucket(bucket)}
                     onClick={() => props.onSelectBucket(bucket)}
                   >
                     {bucket} ({count})
@@ -119,6 +121,7 @@ export function DashboardView(props: {
                     key={entry.entryId}
                     type="button"
                     className={`entry-row ${route.entryId === entry.entryId ? 'selected' : ''}`}
+                    data-tone={getToneForBucket(entry.bucket)}
                     onClick={() => props.onSelectEntry(entry)}
                   >
                     <strong>{entry.workerId ?? 'Unknown worker'}</strong>
@@ -175,7 +178,7 @@ export function QueueView(props: {
         </div>
         <div className="queue-tabs">
           {(['manual-review', 'quarantined', 'conflicts', 'guardrails'] as QueueName[]).map((queueName) => (
-            <button key={queueName} type="button" className={route.queueName === queueName ? 'active' : ''} onClick={() => props.onQueueChange(queueName)}>
+            <button key={queueName} type="button" className={route.queueName === queueName ? 'active' : ''} data-tone={getToneForBucket(queueName)} onClick={() => props.onQueueChange(queueName)}>
               {queueName}
             </button>
           ))}
@@ -225,7 +228,7 @@ export function QueueView(props: {
         {queueResponse?.warnings?.length ? <WarningPanel title="Queue warnings" warnings={queueResponse.warnings} /> : null}
         <div className="queue-list">
           {(queueResponse?.entries ?? []).map((entry) => (
-            <div className="queue-item" key={entry.entryId}>
+            <div className="queue-item" data-tone={getToneForBucket(entry.bucket)} key={entry.entryId}>
               <div>
                 <strong>{entry.workerId ?? 'Unknown worker'}</strong>
                 <p>{entry.reason ?? entry.reviewCaseType ?? entry.bucketLabel}</p>
@@ -286,7 +289,7 @@ export function WorkerView(props: { route: RouteState; workerDetail: WorkerDetai
         </div>
         <div className="queue-list">
           {(workerDetail?.relatedEntries ?? []).map((entry) => (
-            <div className="queue-item" key={entry.entryId}>
+            <div className="queue-item" data-tone={getToneForBucket(entry.bucket)} key={entry.entryId}>
               <div>
                 <strong>{entry.bucketLabel}</strong>
                 <p>{entry.reason ?? entry.reviewCategory ?? entry.groupLabel}</p>

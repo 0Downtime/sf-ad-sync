@@ -26,7 +26,7 @@ async function main(): Promise<void> {
 
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(distRoot));
-    app.get('*', async (_request, response) => {
+    app.get('/{*path}', async (_request, response) => {
       response.sendFile(path.join(distRoot, 'index.html'));
     });
   } else {
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     });
 
     app.use(vite.middlewares);
-    app.get('*', async (request, response, next) => {
+    app.get('/{*path}', async (request, response, next) => {
       try {
         const templatePath = path.join(clientRoot, 'index.html');
         const template = await fs.readFile(templatePath, 'utf8');

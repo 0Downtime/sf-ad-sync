@@ -243,6 +243,33 @@ pwsh ./scripts/Invoke-SyntheticSyncFactorsDryRun.ps1 `
 Use `-MaxCreatesPerRun` to intentionally test guardrail failures, `-DuplicateWorkerIdCount` to inject duplicate source identities, and `-ExistingUpnCollisionCount` to simulate create-time UPN collisions.
 The harness also assigns each synthetic user a manager from a generated manager directory so the `manager` attribute is populated in the dry-run create payloads.
 
+To generate a richer local demo dataset for the TUI and web UI on macOS without Active Directory or a live SuccessFactors tenant:
+
+```powershell
+pwsh ./scripts/Invoke-SyncFactorsDemoData.ps1 `
+  -OutputDirectory ./reports/demo
+```
+
+The demo generator writes a derived config under `./reports/demo/config/demo.mock-sync-config.json`, seeds multiple completed reports across the normal report and review directories, populates tracked-worker state, and writes `runtime-status.json` with an active in-progress run by default.
+Use `-Force` to replace an existing demo output tree, `-IncludeActiveRun:$false` if you want the dashboards to start idle, and `-RunCount` if you want more than the default mixed-history set.
+
+Then launch the terminal dashboard against the generated demo config:
+
+```powershell
+pwsh ./scripts/Watch-SyncFactorsMonitor.ps1 `
+  -ConfigPath ./reports/demo/config/demo.mock-sync-config.json `
+  -PauseAutoRefresh
+```
+
+Or launch the local web dashboard against the same demo config:
+
+```bash
+npm install --cache /tmp/syncfactors-npm-cache
+npm run web:dev -- --config ./reports/demo/config/demo.mock-sync-config.json
+```
+
+Both dashboards will read the generated report history, review queues, worker history, tracked-worker state, and runtime snapshot from the demo output directory.
+
 To run the real sync against a local mock SuccessFactors API instead of a tenant:
 
 1. Start the mock API in one terminal:
