@@ -321,6 +321,7 @@ export function DetailRow({ label, value }: { label: string; value: string }) {
 export function CopyLinkButton({ label }: { label: string }) {
   return (
     <button
+      className="copy-link-button"
       type="button"
       onClick={() => {
         void navigator.clipboard?.writeText(window.location.href);

@@ -489,7 +489,12 @@ if ($effectiveRunCount -gt 5) {
     $extraRunTime = $runBaseTime.AddMinutes(20)
     for ($runIndex = 6; $runIndex -le $effectiveRunCount; $runIndex++) {
         $extraRun = New-SyncFactorsReport -Mode 'Delta' -DryRun -ConfigPath $demoConfigPath -MappingConfigPath $resolvedMappingConfigPath -StatePath $statePath -ArtifactType 'WorkerSync'
-        foreach ($worker in (Get-SyncFactorsDemoWorkerSlice -Workers $workers -Indexes @($runIndex + 10, $runIndex + 20, $runIndex + 30))) {
+        $extraIndexes = @(
+            ($runIndex + 10)
+            ($runIndex + 20)
+            ($runIndex + 30)
+        )
+        foreach ($worker in (Get-SyncFactorsDemoWorkerSlice -Workers $workers -Indexes $extraIndexes)) {
             $profile = Get-SyncFactorsSyntheticWorkerProfile -Worker $worker
             Add-SyncFactorsReportEntry -Report $extraRun -Bucket 'unchanged' -Entry @{
                 workerId = $profile.workerId

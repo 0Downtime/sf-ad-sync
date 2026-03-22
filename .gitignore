@@ -22,6 +22,7 @@ web/.vite/
 state/runtime/
 reports/output/
 reports/mock-output/
+reports/demo-*/
 reports/synthetic/
 reports/synthetic*/
 

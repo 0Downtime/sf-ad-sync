@@ -29,6 +29,7 @@ export function DashboardView(props: {
           <div>
             <p className="section-kicker">Run History</p>
             <h2>Recent runs</h2>
+            <p className="runs-hint">Scroll for older runs</p>
           </div>
           <CopyLinkButton label="Copy run view link" />
         </div>
@@ -55,9 +56,9 @@ export function DashboardView(props: {
 
       <section className="card detail-card">
         <div className="card-header">
-          <div>
+          <div className="detail-heading">
             <p className="section-kicker">Run Detail</p>
-            <h2>{runDetail?.run.runId ?? 'Select a run'}</h2>
+            <h2 className="detail-run-id">{runDetail?.run.runId ?? 'Select a run'}</h2>
           </div>
           <div className="header-actions">
             {runDetail?.run ? <span className="badge ghost">{runDetail.run.artifactType}</span> : null}
@@ -334,22 +335,53 @@ function QueuePagination(props: {
 
 function RunTimeline(props: { startedAt: string | null; completedAt: string | null }) {
   const { startedAt, completedAt } = props;
+  const elapsed = formatElapsed(startedAt, completedAt);
 
   return (
     <section className="run-timeline" aria-label="Run timeline">
-      <RunTimelineItem label="Started" timestamp={startedAt} />
-      <RunTimelineItem label="Completed" timestamp={completedAt} emptyLabel="In progress" />
+      <div className="run-timeline-item run-timeline-combined">
+        <div>
+          <span className="run-timeline-label">Started</span>
+          <strong><AbsoluteTimeLabel timestamp={startedAt} /></strong>
+          <RelativeTimeLabel timestamp={startedAt} className="run-timeline-relative" />
+        </div>
+        <div>
+          <span className="run-timeline-label">Completed</span>
+          <strong><AbsoluteTimeLabel timestamp={completedAt} emptyLabel="In progress" /></strong>
+          <RelativeTimeLabel timestamp={completedAt} emptyLabel="In progress" className="run-timeline-relative" />
+        </div>
+        <div>
+          <span className="run-timeline-label">Elapsed</span>
+          <strong>{elapsed}</strong>
+          <span className="run-timeline-relative">{completedAt ? 'total run time' : 'still running'}</span>
+        </div>
+      </div>
     </section>
   );
 }
 
-function RunTimelineItem(props: { label: string; timestamp: string | null; emptyLabel?: string }) {
-  const { label, timestamp, emptyLabel = '-' } = props;
-  return (
-    <div className="run-timeline-item">
-      <span className="run-timeline-label">{label}</span>
-      <strong><AbsoluteTimeLabel timestamp={timestamp} emptyLabel={emptyLabel} /></strong>
-      <RelativeTimeLabel timestamp={timestamp} emptyLabel={emptyLabel} className="run-timeline-relative" />
-    </div>
-  );
+function formatElapsed(startedAt: string | null, completedAt: string | null): string {
+  if (!startedAt) {
+    return '-';
+  }
+
+  const start = new Date(startedAt).getTime();
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return '-';
+  }
+
+  const totalSeconds = Math.max(0, Math.floor((end - start) / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [
+    days ? `${days}d` : null,
+    hours ? `${hours}h` : null,
+    minutes ? `${minutes}m` : null,
+    `${seconds}s`,
+  ].filter(Boolean);
+
+  return parts.join(' ');
 }
